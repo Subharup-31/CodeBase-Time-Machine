@@ -19,6 +19,7 @@
         "clsx": "^2.1.1",
         "framer-motion": "^11.11.17",
         "lucide-react": "^0.460.0",
+        "mermaid": "^11.12.1",
         "next": "14.2.16",
         "octokit": "^4.0.2",
         "react": "^18",

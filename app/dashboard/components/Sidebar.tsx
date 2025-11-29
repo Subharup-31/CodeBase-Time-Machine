@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, History, Settings, LogOut } from "lucide-react";
+import { LayoutDashboard, History, Settings, LogOut, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Sidebar() {
@@ -16,6 +16,10 @@ export default function Sidebar() {
                 <Link href="/dashboard/time-machine" className="flex items-center space-x-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-accent hover:text-accent-foreground transition-colors">
                     <History className="h-5 w-5" />
                     <span>Time Machine</span>
+                </Link>
+                <Link href="/dashboard/flow" className="flex items-center space-x-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-accent hover:text-accent-foreground transition-colors">
+                    <GitBranch className="h-5 w-5" />
+                    <span>Architecture Flow</span>
                 </Link>
                 <Link href="/dashboard/settings" className="flex items-center space-x-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-accent hover:text-accent-foreground transition-colors">
                     <Settings className="h-5 w-5" />

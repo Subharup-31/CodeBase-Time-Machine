@@ -117,14 +117,14 @@ export async function fetchFileContent(repoUrl: string, filePath: string): Promi
     }
 }
 
-export async function fetchCommitHistory(repoUrl: string): Promise<CommitInfo[]> {
+export async function fetchCommitHistory(repoUrl: string, limit: number = 20): Promise<CommitInfo[]> {
     const { owner, repo } = parseGithubRepo(repoUrl);
 
     try {
         const { data } = await octokit.request("GET /repos/{owner}/{repo}/commits", {
             owner,
             repo,
-            per_page: 20, // Limit to last 20 commits for now
+            per_page: limit, // Limit to specified number of commits
         });
 
         return data.map((commit) => ({
@@ -285,5 +285,20 @@ export async function fetchRepoStats(repoUrl: string): Promise<RepoStats | null>
     } catch (error) {
         console.error("Error fetching repo stats:", error);
         return null;
+    }
+}
+
+export async function searchCode(repoUrl: string, query: string): Promise<string[]> {
+    const { owner, repo } = parseGithubRepo(repoUrl);
+    try {
+        const { data } = await octokit.request("GET /search/code", {
+            q: `${query} repo:${owner}/${repo}`,
+            per_page: 5
+        });
+
+        return data.items.map((item: any) => item.path);
+    } catch (error) {
+        console.error("Error searching code:", error);
+        return [];
     }
 }

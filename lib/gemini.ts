@@ -90,3 +90,38 @@ Answer the user's query based strictly on the provided context and the rules abo
         return "I encountered an error while analyzing the code. Please try again.";
     }
 }
+
+export async function expandKeywordsWithAI(keywords: string[]): Promise<string[]> {
+    if (!process.env.GEMINI_API_KEY || keywords.length === 0) {
+        return keywords;
+    }
+
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const prompt = `
+        You are a code search assistant.
+        The user is searching for files related to these keywords: ${JSON.stringify(keywords)}.
+        
+        Generate a JSON array of 5-10 technical synonyms, related file names, or coding concepts that might appear in a codebase for these terms.
+        Example: ["login"] -> ["auth", "authentication", "signin", "session", "jwt", "user_controller"]
+        
+        Return ONLY the JSON array of strings. No markdown, no explanations.
+        `;
+
+        const result = await model.generateContent(prompt);
+        const responseText = await result.response.text();
+
+        // Clean up response to ensure valid JSON
+        const cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+        const expanded = JSON.parse(cleanJson);
+
+        if (Array.isArray(expanded)) {
+            // Combine original keywords with new ones and deduplicate
+            return Array.from(new Set([...keywords, ...expanded]));
+        }
+        return keywords;
+    } catch (error) {
+        console.error("Error expanding keywords with AI:", error);
+        return keywords;
+    }
+}

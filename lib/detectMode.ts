@@ -18,13 +18,13 @@ export function detectMode(query: string): Mode {
         "how", "flow", "explain", "logic", "architecture", "what happens", "walk me through"
     ];
 
-    // Check for timeline keywords
-    if (timelineKeywords.some(k => lowerQuery.includes(k))) {
+    // Check for timeline keywords using regex for word boundaries
+    if (timelineKeywords.some(k => new RegExp(`\\b${k}\\b`).test(lowerQuery))) {
         return "timeline";
     }
 
     // Check for flow keywords (not strictly necessary since it's the default, but good for clarity)
-    if (flowKeywords.some(k => lowerQuery.includes(k))) {
+    if (flowKeywords.some(k => new RegExp(`\\b${k}\\b`).test(lowerQuery))) {
         return "flow";
     }
 

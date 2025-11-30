@@ -5,24 +5,24 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 
-export default function LoginPage() {
+export default function SignupPage() {
     const router = useRouter();
+    const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleSignup = (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        // Mock login delay
+        // Mock signup delay
         setTimeout(() => {
             setLoading(false);
             router.push("/dashboard");
-        }, 1000);
+        }, 1500);
     };
 
     return (
@@ -55,11 +55,23 @@ export default function LoginPage() {
                                 A
                             </div>
                         </div>
-                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Welcome back</h1>
-                        <p className="text-gray-500 text-sm">Enter your credentials to access your dashboard</p>
+                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Create an account</h1>
+                        <p className="text-gray-500 text-sm">Enter your details to get started</p>
                     </div>
 
-                    <form onSubmit={handleLogin} className="space-y-6">
+                    <form onSubmit={handleSignup} className="space-y-6">
+                        <div className="space-y-2">
+                            <label htmlFor="name" className="text-sm font-medium text-gray-700">Full Name</label>
+                            <Input
+                                id="name"
+                                type="text"
+                                placeholder="John Doe"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                required
+                                className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
+                            />
+                        </div>
                         <div className="space-y-2">
                             <label htmlFor="email" className="text-sm font-medium text-gray-700">Email</label>
                             <Input
@@ -73,12 +85,7 @@ export default function LoginPage() {
                             />
                         </div>
                         <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <label htmlFor="password" className="text-sm font-medium text-gray-700">Password</label>
-                                <Link href="#" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
-                                    Forgot password?
-                                </Link>
-                            </div>
+                            <label htmlFor="password" className="text-sm font-medium text-gray-700">Password</label>
                             <Input
                                 id="password"
                                 type="password"
@@ -94,13 +101,13 @@ export default function LoginPage() {
                             type="submit"
                             disabled={loading}
                         >
-                            {loading ? "Signing in..." : "Sign In"}
+                            {loading ? "Creating account..." : "Sign Up"}
                         </Button>
 
                         <div className="text-center text-sm text-gray-500">
-                            Don&apos;t have an account?{" "}
-                            <Link href="/signup" className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline">
-                                Sign up
+                            Already have an account?{" "}
+                            <Link href="/login" className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline">
+                                Sign in
                             </Link>
                         </div>
                     </form>

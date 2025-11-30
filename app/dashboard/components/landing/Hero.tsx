@@ -33,9 +33,14 @@ export default function Hero() {
                                 Through{" "}
                             </span>
                             <motion.span
-                                initial={{ width: 0 }}
-                                animate={{ width: "auto" }}
-                                transition={{ duration: 1.5, delay: 0.5, ease: "linear" }}
+                                initial={{ maxWidth: 0 }}
+                                animate={{ maxWidth: [0, 600, 600, 0, 0] }}
+                                transition={{
+                                    duration: 8,
+                                    times: [0, 0.1875, 0.625, 0.8125, 1],
+                                    repeat: Infinity,
+                                    ease: "linear"
+                                }}
                                 className="inline-block overflow-hidden align-bottom whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-indigo-600"
                             >
                                 Time & Space
@@ -165,6 +170,6 @@ export default function Hero() {
                     <div className="absolute -z-10 -bottom-10 -left-10 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl" />
                 </motion.div>
             </div>
-        </section>
+        </section >
     );
 }

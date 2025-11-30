@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { getRepoByName, getAllRepos } from "@/lib/repoRegistry";
 import { detectMode } from "@/lib/detectMode";
 import { searchVectors, getCollectionName } from "@/lib/qdrant";
-import { generateAnswerWithContext, embedText } from "@/lib/gemini";
+import { generateAnswerWithContext, embedText, expandKeywordsWithAI } from "@/lib/gemini";
 import { analyzeCodeFlow } from "@/lib/flowEngine";
 import { generateFlowPrompt } from "@/lib/prompt.flow";
-import { fetchRepoTree, fetchFileCommits, resolveFilePathByName, fetchCommitHistory, fetchCommitDetails } from "@/lib/git";
+import { fetchRepoTree, fetchFileCommits, resolveFilePathByName, fetchCommitHistory, fetchCommitDetails, searchCode } from "@/lib/git";
 
 export async function POST(req: Request) {
     try {
@@ -64,14 +64,70 @@ export async function POST(req: Request) {
 
             // 1) Try to detect a file name from the query
             const fileNameMatch = cleanQuery.match(/([a-zA-Z0-9_\-\/]+\.(js|ts|tsx|jsx|html|css|json))/);
-            const rawFileName = fileNameMatch ? fileNameMatch[1] : null;
+            let rawFileName = fileNameMatch ? fileNameMatch[1] : null;
+
+            // --- SMART FILE DETECTION ---
+            if (!rawFileName) {
+                const lowerQ = cleanQuery.toLowerCase();
+                const stopWords = ["when", "was", "the", "added", "introduced", "fixed", "removed", "changed", "bug", "feature", "in", "on", "at", "to", "for", "how", "does", "work", "show", "me"];
+                const keywords = lowerQ.split(/\s+/).filter((w: string) => !stopWords.includes(w) && w.length > 2);
+
+                if (keywords.length > 0) {
+                    console.log("[Timeline] Smart Detection: Looking for files matching keywords:", keywords);
+
+                    // 1. Keyword Expansion (AI Powered)
+                    let searchTerms: string[] = keywords;
+                    try {
+                        console.log("[Timeline] Expanding keywords with AI...");
+                        searchTerms = await expandKeywordsWithAI(keywords);
+                        console.log("[Timeline] AI Expanded keywords:", searchTerms);
+                    } catch (e) {
+                        console.error("[Timeline] AI expansion failed, using original keywords", e);
+                    }
+                    console.log("[Timeline] Expanded keywords:", searchTerms);
+
+                    // 2. Fuzzy File Search (Tree)
+                    try {
+                        const tree = await fetchRepoTree(repoUrl, true); // Filtered tree
+                        // Prioritize exact keyword matches in filename
+                        const fuzzyMatch = tree.find((node: any) => {
+                            const name = node.path.split("/").pop()?.toLowerCase() || "";
+                            return searchTerms.some((term: string) => name.includes(term));
+                        });
+
+                        if (fuzzyMatch) {
+                            console.log("[Timeline] Smart Detection: Found fuzzy file match:", fuzzyMatch.path);
+                            rawFileName = fuzzyMatch.path;
+                        }
+                    } catch (e: any) {
+                        console.error("[Timeline] Smart Detection: Tree search failed", e.message || e);
+                    }
+
+                    // 3. Code Content Search (GitHub Search API)
+                    if (!rawFileName) {
+                        try {
+                            // Search for the first significant keyword
+                            const query = searchTerms[0] as string;
+                            console.log("[Timeline] Smart Detection: Searching code for:", query);
+                            const codeMatches = await searchCode(repoUrl, query);
+
+                            if (codeMatches.length > 0) {
+                                console.log("[Timeline] Smart Detection: Found code match:", codeMatches[0]);
+                                rawFileName = codeMatches[0];
+                            }
+                        } catch (e: any) {
+                            console.error("[Timeline] Smart Detection: Code search failed", e.message || e);
+                        }
+                    }
+                }
+            }
 
             // --- REPO-LEVEL QUERIES (No specific file) ---
             if (!rawFileName) {
                 const lowerQ = cleanQuery.toLowerCase();
 
                 // A) Last Commit / Latest Commit
-                if (lowerQ.includes("last commit") || lowerQ.includes("latest commit") || lowerQ.includes("what changed")) {
+                if (/\b(last|latest)\s+commit\b/.test(lowerQ) || /\bwhat\s+changed\b/.test(lowerQ)) {
                     const history = await fetchCommitHistory(repoUrl);
                     if (!history || history.length === 0) {
                         return NextResponse.json({
@@ -115,7 +171,7 @@ ${diffSummary}${extraFiles}`;
                 }
 
                 // B) All Commits / History / Log
-                if (lowerQ.includes("all commits") || lowerQ.includes("history") || lowerQ.includes("log") || lowerQ.includes("commits")) {
+                if (/\b(all\s+commits|history|log|commits)\b/.test(lowerQ)) {
                     const history = await fetchCommitHistory(repoUrl);
                     if (!history || history.length === 0) {
                         return NextResponse.json({
@@ -135,7 +191,7 @@ ${diffSummary}${extraFiles}`;
                 }
 
                 // C) Count Commits (Approximation based on recent fetch)
-                if (lowerQ.includes("how many commits") || lowerQ.includes("count")) {
+                if (/\b(how\s+many\s+commits|count)\b/.test(lowerQ)) {
                     const history = await fetchCommitHistory(repoUrl);
                     return NextResponse.json({
                         mode: "timeline",
@@ -144,11 +200,41 @@ ${diffSummary}${extraFiles}`;
                     });
                 }
 
+                // D) Keyword Search Fallback (e.g. "when was login added")
+                const stopWords = ["when", "was", "the", "added", "introduced", "fixed", "removed", "changed", "bug", "feature", "in", "on", "at", "to", "for", "how", "does", "work"];
+                const keywords = lowerQ.split(/\s+/).filter((w: string) => !stopWords.includes(w) && w.length > 2);
+
+                if (keywords.length > 0) {
+                    console.log("[Timeline] Attempting keyword search for:", keywords);
+                    // Fetch more history for searching
+                    const history = await fetchCommitHistory(repoUrl, 50);
+
+                    const matches = history.filter(c => {
+                        const msg = c.message.toLowerCase();
+                        return keywords.some((k: string) => msg.includes(k));
+                    });
+
+                    if (matches.length > 0) {
+                        const list = matches.slice(0, 5).map(c => `• **${c.date.split("T")[0]}**: ${c.message.split("\n")[0]} - *${c.author}* (\`${c.sha.slice(0, 7)}\`)`).join("\n");
+                        return NextResponse.json({
+                            mode: "timeline",
+                            repo: activeRepoName,
+                            answer: `I found these commits related to **"${keywords.join(", ")}"**:\n\n${list}\n\n*(Searched last 50 commits)*`
+                        });
+                    } else {
+                        return NextResponse.json({
+                            mode: "timeline",
+                            repo: activeRepoName,
+                            answer: `I searched the last 50 commits for **"${keywords.join(", ")}"** but didn't find any matches. Try specifying a file name if you know it.`
+                        });
+                    }
+                }
+
                 // Fallback if no file and no specific repo command
                 return NextResponse.json({
                     mode: "timeline",
                     repo: activeRepoName,
-                    answer: "Timeline mode supports file-based questions (e.g., \"when was login.html added?\") or repo-level queries (e.g., \"show last commit\", \"show history\"). Please be more specific."
+                    answer: "Timeline mode supports file-based questions (e.g., \"when was login.html added?\"), repo-level queries (e.g., \"show last commit\"), or keyword searches (e.g., \"when was login added\"). Please be more specific."
                 });
             }
 

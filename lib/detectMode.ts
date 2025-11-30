@@ -4,8 +4,8 @@ export function detectMode(query: string): Mode {
     const lowerQuery = query.toLowerCase();
 
     // Command detection
-    // Matches: "list files", "list all files", "show me files", "give me a list of files", "what files exist"
-    if (lowerQuery.match(/^(list|show|give|get|what)(\s+(me|us))?(\s+(a|the))?(\s+list\s+of)?(\s+(all|repo))?\s+(\d+\s+)?files?/)) {
+    // Matches: "list files", "list 5 files", "list any 5 files", "show me files", "give me a list of files"
+    if (lowerQuery.match(/^(list|show|give|get|what)(\s+(me|us))?(\s+(a|the|any|some|top|recent))?(\s+list\s+of)?(\s+(all|repo))?\s*(\d+\s*)?files?/)) {
         return "command";
     }
 

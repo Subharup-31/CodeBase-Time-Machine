@@ -147,14 +147,14 @@ export async function POST(req: Request) {
                         });
                     }
 
-                    const diffSummary = details.files.slice(0, 5).map(f => `• ${f.status}: \`${f.filename}\` (+${f.additions} -${f.deletions})`).join("\n");
+                    const diffSummary = details.files.slice(0, 5).map(f => `• ${f.status}: ${f.filename} (+${f.additions} -${f.deletions})`).join("\n");
                     const extraFiles = details.files.length > 5 ? `\n...and ${details.files.length - 5} more files.` : "";
 
                     const answer = `Summary:
-The last commit was made on **${details.date.split("T")[0]}** by **${details.author}**.
+The last commit was made on ${details.date.split("T")[0]} by ${details.author}.
 
 Details:
-• SHA: \`${details.sha.slice(0, 7)}\`
+• SHA: ${details.sha.slice(0, 7)}
 • Message: ${details.message.split("\n")[0]}
 • Date: ${details.date}
 • Link: ${details.htmlUrl}
@@ -181,7 +181,7 @@ ${diffSummary}${extraFiles}`;
                         });
                     }
 
-                    const list = history.map(c => `• **${c.date.split("T")[0]}**: ${c.message.split("\n")[0]} - *${c.author}* (\`${c.sha.slice(0, 7)}\`)`).join("\n");
+                    const list = history.map(c => `• ${c.date.split("T")[0]}: ${c.message.split("\n")[0]} - ${c.author} (${c.sha.slice(0, 7)})`).join("\n");
 
                     return NextResponse.json({
                         mode: "timeline",
@@ -196,7 +196,7 @@ ${diffSummary}${extraFiles}`;
                     return NextResponse.json({
                         mode: "timeline",
                         repo: activeRepoName,
-                        answer: `I found **${history.length}** recent commits in @${activeRepoName}. (Note: This is a partial list retrieved from the API).`
+                        answer: `I found ${history.length} recent commits in @${activeRepoName}. (Note: This is a partial list retrieved from the API).`
                     });
                 }
 
@@ -219,13 +219,13 @@ ${diffSummary}${extraFiles}`;
                         return NextResponse.json({
                             mode: "timeline",
                             repo: activeRepoName,
-                            answer: `I found these commits related to **"${keywords.join(", ")}"**:\n\n${list}\n\n*(Searched last 50 commits)*`
+                            answer: `I found these commits related to "${keywords.join(", ")}":\n\n${list}\n\n(Searched last 50 commits)`
                         });
                     } else {
                         return NextResponse.json({
                             mode: "timeline",
                             repo: activeRepoName,
-                            answer: `I searched the last 50 commits for **"${keywords.join(", ")}"** but didn't find any matches. Try specifying a file name if you know it.`
+                            answer: `I searched the last 50 commits for "${keywords.join(", ")}" but didn't find any matches. Try specifying a file name if you know it.`
                         });
                     }
                 }
@@ -290,23 +290,23 @@ ${diffSummary}${extraFiles}`;
 
             const answerLines: string[] = [];
 
-            answerLines.push(`Here is the commit timeline for \`${resolvedPath}\` in @${activeRepoName}:`);
+            answerLines.push(`Here is the commit timeline for ${resolvedPath} in @${activeRepoName}:`);
             answerLines.push("");
-            answerLines.push(`• First added: **${oldest.date}** by **${oldest.authorName}**`);
-            answerLines.push(`  - Commit: \`${oldest.sha.slice(0, 7)}\``);
+            answerLines.push(`• First added: ${oldest.date} by ${oldest.authorName}`);
+            answerLines.push(`  - Commit: ${oldest.sha.slice(0, 7)}`);
             answerLines.push(`  - Message: ${oldest.message.split("\n")[0]}`);
             answerLines.push(`  - Link: ${oldest.htmlUrl}`);
             answerLines.push("");
-            answerLines.push(`• Last modified: **${newest.date}** by **${newest.authorName}**`);
-            answerLines.push(`  - Commit: \`${newest.sha.slice(0, 7)}\``);
+            answerLines.push(`• Last modified: ${newest.date} by ${newest.authorName}`);
+            answerLines.push(`  - Commit: ${newest.sha.slice(0, 7)}`);
             answerLines.push(`  - Message: ${newest.message.split("\n")[0]}`);
             answerLines.push(`  - Link: ${newest.htmlUrl}`);
             answerLines.push("");
-            answerLines.push(`• Total commits touching this file: **${totalCommits}**`);
+            answerLines.push(`• Total commits touching this file: ${totalCommits}`);
 
             // Optional: include a short history preview
             const historyPreview = commits.slice(0, 5).map((c, index) => {
-                return `  ${index + 1}. [${c.date}] ${c.authorName} — ${c.message.split("\n")[0]} (\`${c.sha.slice(0, 7)}\`)`;
+                return `  ${index + 1}. [${c.date}] ${c.authorName} — ${c.message.split("\n")[0]} (${c.sha.slice(0, 7)})`;
             });
 
             if (historyPreview.length > 0) {
@@ -351,7 +351,7 @@ ${diffSummary}${extraFiles}`;
             const filesToShow = allFiles.slice(0, limit);
             const fileList = filesToShow.map(f => `- ${f.path}`).join("\n");
 
-            const answer = `Here are the files in **${activeRepoName}**:\n\n${fileList}\n\n${limit < allFiles.length ? `*(Showing ${limit} of ${allFiles.length} files)*` : `*(Total ${allFiles.length} files)*`}`;
+            const answer = `Here are the files in ${activeRepoName}:\n\n${fileList}\n\n${limit < allFiles.length ? `(Showing ${limit} of ${allFiles.length} files)` : `(Total ${allFiles.length} files)`}`;
 
             return NextResponse.json({
                 mode: "command",

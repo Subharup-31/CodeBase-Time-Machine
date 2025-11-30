@@ -66,7 +66,7 @@ export default function MermaidDiagram({ chart, onRegenerate }: MermaidDiagramPr
     const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.2, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.2, 0.5));
     const handleReset = () => {
-        setZoom(1);
+        setZoom(2); // Default to 200% for fullscreen
         setPosition({ x: 0, y: 0 });
     };
 
@@ -117,7 +117,10 @@ export default function MermaidDiagram({ chart, onRegenerate }: MermaidDiagramPr
                     variant="secondary"
                     size="icon"
                     className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => setIsFullscreen(true)}
+                    onClick={() => {
+                        setIsFullscreen(true);
+                        setZoom(2);
+                    }}
                 >
                     <Maximize2 className="h-4 w-4" />
                 </Button>

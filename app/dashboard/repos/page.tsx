@@ -83,15 +83,15 @@ export default function ReposPage() {
 
     return (
         <div className="space-y-8">
-            <div>
-                <h2 className="text-3xl font-bold tracking-tight">Repository Manager</h2>
-                <p className="text-muted-foreground">Manage your indexed repositories and memory collections.</p>
+            <div className="flex flex-col gap-2">
+                <h2 className="text-3xl font-bold tracking-tight text-gray-900">Repository Manager</h2>
+                <p className="text-gray-500">Manage your indexed repositories and memory collections.</p>
             </div>
 
-            <Card>
+            <Card className="bg-white/70 backdrop-blur-xl border-gray-200/50 shadow-sm">
                 <CardHeader>
-                    <CardTitle>Add New Repository</CardTitle>
-                    <CardDescription>Connect a GitHub repository to start indexing.</CardDescription>
+                    <CardTitle className="text-gray-900">Add New Repository</CardTitle>
+                    <CardDescription className="text-gray-500">Connect a GitHub repository to start indexing.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -99,14 +99,20 @@ export default function ReposPage() {
                             placeholder="Display Name (e.g. MyAuthService)"
                             value={newRepoName}
                             onChange={(e) => setNewRepoName(e.target.value)}
+                            className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
                         />
                         <Input
                             placeholder="GitHub URL (https://github.com/...)"
                             value={newRepoUrl}
                             onChange={(e) => setNewRepoUrl(e.target.value)}
+                            className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
                         />
                     </div>
-                    <Button onClick={handleAddRepo} disabled={adding || !newRepoName || !newRepoUrl}>
+                    <Button
+                        onClick={handleAddRepo}
+                        disabled={adding || !newRepoName || !newRepoUrl}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl hover:-translate-y-0.5"
+                    >
                         {adding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
                         Add Repository
                     </Button>
@@ -115,28 +121,33 @@ export default function ReposPage() {
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {loading ? (
-                    <div className="col-span-full text-center py-12 text-muted-foreground">Loading repositories...</div>
+                    <div className="col-span-full text-center py-12 text-gray-500">Loading repositories...</div>
                 ) : repos.length === 0 ? (
-                    <div className="col-span-full text-center py-12 text-muted-foreground">No repositories added yet.</div>
+                    <div className="col-span-full text-center py-12 text-gray-500">No repositories added yet.</div>
                 ) : (
                     repos.map((repo) => (
-                        <Card key={repo.name}>
+                        <Card key={repo.name} className="bg-white/70 backdrop-blur-xl border-gray-200/50 shadow-sm hover:shadow-md transition-all duration-200 group">
                             <CardHeader className="pb-2">
-                                <CardTitle className="flex items-center justify-between">
+                                <CardTitle className="flex items-center justify-between text-gray-900">
                                     <span className="truncate">{repo.name}</span>
-                                    <Database className="h-4 w-4 text-muted-foreground" />
+                                    <Database className="h-4 w-4 text-indigo-500" />
                                 </CardTitle>
-                                <CardDescription className="truncate">{repo.url}</CardDescription>
+                                <CardDescription className="truncate text-gray-500">{repo.url}</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-xs text-muted-foreground mb-4">
+                                <div className="text-xs text-gray-500 mb-4 bg-gray-50 p-2 rounded border border-gray-100 font-mono">
                                     Collection: {repo.collection}
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <div className="text-xs bg-secondary px-2 py-1 rounded">
+                                    <div className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 font-medium">
                                         Use @{repo.name}
                                     </div>
-                                    <Button variant="destructive" size="sm" onClick={() => handleDeleteRepo(repo.name)}>
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => handleDeleteRepo(repo.name)}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
                                 </div>

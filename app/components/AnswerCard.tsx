@@ -11,9 +11,10 @@ interface AnswerCardProps {
     context: CodeChunk[];
     files?: string[];
     repo?: string;
+    onRegenerate?: () => void;
 }
 
-export default function AnswerCard({ answer, context, repo, files }: AnswerCardProps) {
+export default function AnswerCard({ answer, context, repo, files, onRegenerate }: AnswerCardProps) {
     // Split answer by mermaid blocks
     const parts = answer.split(/```mermaid([\s\S]*?)```/g);
 
@@ -36,7 +37,7 @@ export default function AnswerCard({ answer, context, repo, files }: AnswerCardP
                         {parts.map((part, index) => {
                             if (index % 2 === 1) {
                                 // Mermaid block
-                                return <MermaidDiagram key={index} chart={part.trim()} />;
+                                return <MermaidDiagram key={index} chart={part.trim()} onRegenerate={onRegenerate} />;
                             }
                             // Regular text
                             return <p key={index} className="whitespace-pre-wrap leading-relaxed">{part}</p>;

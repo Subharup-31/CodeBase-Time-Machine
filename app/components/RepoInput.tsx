@@ -47,13 +47,13 @@ export default function RepoInput() {
     };
 
     return (
-        <Card className="w-full border-primary/20 bg-gradient-to-br from-background to-primary/5">
+        <Card className="w-full bg-white/70 backdrop-blur-xl border-gray-200/50 shadow-sm">
             <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                    <GitBranch className="h-5 w-5 text-primary" />
+                <CardTitle className="flex items-center gap-2 text-gray-900">
+                    <GitBranch className="h-5 w-5 text-indigo-600" />
                     Connect Repository
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-gray-500">
                     Enter a public GitHub repository URL to index its history and logic.
                 </CardDescription>
             </CardHeader>
@@ -64,19 +64,21 @@ export default function RepoInput() {
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
                         disabled={loading}
+                        className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
                     />
                     <Input
                         placeholder="https://github.com/username/repo"
                         value={repoUrl}
                         onChange={(e) => setRepoUrl(e.target.value)}
                         disabled={loading}
+                        className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
                     />
                 </div>
 
                 <Button
                     onClick={handleProcess}
                     disabled={loading || !repoUrl}
-                    className="w-full md:w-auto"
+                    className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl hover:-translate-y-0.5"
                 >
                     {loading ? (
                         <>
@@ -89,7 +91,7 @@ export default function RepoInput() {
                 </Button>
 
                 {status === "success" && (
-                    <div className="p-4 rounded-md bg-green-500/10 text-green-600 dark:text-green-400 flex items-center gap-2 border border-green-500/20">
+                    <div className="p-4 rounded-xl bg-green-50 text-green-700 flex items-center gap-2 border border-green-200">
                         <CheckCircle2 className="h-5 w-5" />
                         <div>
                             <p className="font-medium">{message}</p>
@@ -99,7 +101,7 @@ export default function RepoInput() {
                 )}
 
                 {status === "error" && (
-                    <div className="p-4 rounded-md bg-destructive/10 text-destructive flex items-center gap-2 border border-destructive/20">
+                    <div className="p-4 rounded-xl bg-red-50 text-red-700 flex items-center gap-2 border border-red-200">
                         <AlertCircle className="h-5 w-5" />
                         <p className="font-medium">{message}</p>
                     </div>

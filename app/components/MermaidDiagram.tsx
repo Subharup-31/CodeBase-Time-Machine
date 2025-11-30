@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import mermaid from "mermaid";
-import { Maximize2, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { Maximize2, X, ZoomIn, ZoomOut, RotateCcw, RefreshCw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface MermaidDiagramProps {
     chart: string;
+    onRegenerate?: () => void;
 }
 
-export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
+export default function MermaidDiagram({ chart, onRegenerate }: MermaidDiagramProps) {
     const ref = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -17,28 +18,50 @@ export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [position, setPosition] = useState({ x: 0, y: 0 });
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
+    const [error, setError] = useState(false);
 
     useEffect(() => {
-        if (ref.current) {
-            mermaid.initialize({
-                startOnLoad: true,
-                theme: "default",
-                securityLevel: "loose",
-            });
-            mermaid.run({
-                nodes: [ref.current],
-            });
-        }
+        const renderChart = async () => {
+            if (ref.current) {
+                try {
+                    setError(false);
+                    mermaid.initialize({
+                        startOnLoad: true,
+                        theme: "default",
+                        securityLevel: "loose",
+                        suppressErrorRendering: true, // We handle errors manually
+                    });
+
+                    // Validate syntax first
+                    try {
+                        await mermaid.parse(chart);
+                    } catch (e) {
+                        console.error("Mermaid syntax error:", e);
+                        setError(true);
+                        return;
+                    }
+
+                    await mermaid.run({
+                        nodes: [ref.current],
+                    });
+                } catch (e) {
+                    console.error("Mermaid rendering error:", e);
+                    setError(true);
+                }
+            }
+        };
+
+        renderChart();
     }, [chart]);
 
     // Re-render mermaid in modal when opening fullscreen
     useEffect(() => {
-        if (isFullscreen && modalRef.current) {
+        if (isFullscreen && modalRef.current && !error) {
             mermaid.run({
                 nodes: [modalRef.current],
             });
         }
-    }, [isFullscreen, chart]);
+    }, [isFullscreen, chart, error]);
 
     const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.2, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.2, 0.5));
@@ -58,6 +81,30 @@ export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
     };
 
     const handleMouseUp = () => setIsDragging(false);
+
+    if (error) {
+        return (
+            <div className="my-4 p-6 bg-red-50 border border-red-100 rounded-lg flex flex-col items-center justify-center gap-3 text-center">
+                <div className="bg-red-100 p-3 rounded-full">
+                    <AlertTriangle className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                    <h3 className="font-medium text-red-900">Diagram Generation Failed</h3>
+                    <p className="text-sm text-red-600 mt-1">The AI generated an invalid diagram syntax.</p>
+                </div>
+                {onRegenerate && (
+                    <Button
+                        onClick={onRegenerate}
+                        variant="outline"
+                        className="mt-2 border-red-200 text-red-700 hover:bg-red-100 hover:text-red-800"
+                    >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Regenerate Diagram
+                    </Button>
+                )}
+            </div>
+        );
+    }
 
     return (
         <>

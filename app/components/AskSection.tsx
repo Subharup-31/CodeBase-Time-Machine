@@ -101,10 +101,10 @@ export default function AskSection() {
     return (
         <div className="space-y-6">
             <div className="space-y-2">
-                <h2 className="text-2xl font-bold tracking-tight">Ask Time Machine</h2>
-                <p className="text-muted-foreground">
+                <h2 className="text-2xl font-bold tracking-tight text-gray-900">Ask Time Machine</h2>
+                <p className="text-gray-500">
                     Ask questions about the codebase history or logic.
-                    <span className="block text-xs text-primary mt-1">
+                    <span className="block text-xs text-indigo-600 mt-1 font-medium">
                         Tip: Use <strong>@RepoName</strong> to ask about a specific repository.
                     </span>
                 </p>
@@ -127,9 +127,13 @@ export default function AskSection() {
                                 }
                             }
                         }}
-                        className="flex-1"
+                        className="flex-1 h-12 bg-white/70 backdrop-blur-xl border-gray-200/50 shadow-sm focus:border-indigo-500 focus:ring-indigo-500/20 rounded-xl"
                     />
-                    <Button onClick={handleAsk} disabled={loading}>
+                    <Button
+                        onClick={handleAsk}
+                        disabled={loading}
+                        className="h-12 px-6 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl hover:-translate-y-0.5 rounded-xl"
+                    >
                         {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                         Ask
                     </Button>
@@ -137,15 +141,15 @@ export default function AskSection() {
 
                 {showDropdown && (
                     <div ref={dropdownRef} className="absolute top-full left-0 mt-2 w-64 z-50">
-                        <Card className="border-primary/20 shadow-lg">
+                        <Card className="border-gray-200/50 shadow-xl bg-white/90 backdrop-blur-xl">
                             <CardContent className="p-1">
                                 {filteredRepos.map((repo) => (
                                     <div
                                         key={repo.name}
-                                        className="flex items-center gap-2 px-3 py-2 text-sm rounded-md cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors"
+                                        className="flex items-center gap-2 px-3 py-2 text-sm rounded-md cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors text-gray-700"
                                         onClick={() => selectRepo(repo.name)}
                                     >
-                                        <Database className="h-3 w-3 text-muted-foreground" />
+                                        <Database className="h-3 w-3 text-gray-400" />
                                         <span>{repo.name}</span>
                                     </div>
                                 ))}
@@ -161,6 +165,7 @@ export default function AskSection() {
                     context={result.context}
                     repo={result.repo}
                     files={result.files}
+                    onRegenerate={handleAsk}
                 />
             )}
         </div>

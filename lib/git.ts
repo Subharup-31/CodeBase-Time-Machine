@@ -250,3 +250,40 @@ export async function fetchCommitDetails(repoUrl: string, sha: string): Promise<
         return null;
     }
 }
+
+export interface RepoStats {
+    name: string;
+    description: string | null;
+    stars: number;
+    forks: number;
+    openIssues: number;
+    lastUpdate: string;
+    pushedAt: string;
+    size: number;
+    defaultBranch: string;
+}
+
+export async function fetchRepoStats(repoUrl: string): Promise<RepoStats | null> {
+    const { owner, repo } = parseGithubRepo(repoUrl);
+    try {
+        const { data } = await octokit.request("GET /repos/{owner}/{repo}", {
+            owner,
+            repo,
+        });
+
+        return {
+            name: data.name,
+            description: data.description,
+            stars: data.stargazers_count,
+            forks: data.forks_count,
+            openIssues: data.open_issues_count,
+            lastUpdate: data.updated_at,
+            pushedAt: data.pushed_at,
+            size: data.size,
+            defaultBranch: data.default_branch,
+        };
+    } catch (error) {
+        console.error("Error fetching repo stats:", error);
+        return null;
+    }
+}

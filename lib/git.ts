@@ -37,7 +37,7 @@ export interface FileCommit {
     htmlUrl: string;       // direct URL to the commit on GitHub
 }
 
-export async function fetchRepoTree(repoUrl: string): Promise<GitFileNode[]> {
+export async function fetchRepoTree(repoUrl: string, filter: boolean = true): Promise<GitFileNode[]> {
     const { owner, repo } = parseGithubRepo(repoUrl);
 
     try {
@@ -56,10 +56,13 @@ export async function fetchRepoTree(repoUrl: string): Promise<GitFileNode[]> {
             recursive: "1",
         });
 
-        // 3. Filter for files (blobs) and exclude binaries/docs
+        // 3. Filter for files (blobs)
         return treeData.tree
             .filter((node) => {
                 if (node.type !== "blob" || !node.path) return false;
+
+                // If filtering is disabled, return all files
+                if (!filter) return true;
 
                 const fileName = node.path.split("/").pop()?.toLowerCase();
                 if (!fileName) return false;

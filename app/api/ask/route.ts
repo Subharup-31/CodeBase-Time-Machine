@@ -49,32 +49,6 @@ export async function POST(req: Request) {
         console.log(`Query: "${cleanQuery}" | Mode: ${mode} | Repo: ${activeRepoName}`);
 
         // --- COMMAND MODE ---
-        if (mode === "command") {
-            if (cleanQuery.toLowerCase().includes("list files")) {
-                try {
-                    const files = await fetchRepoTree(repoUrl);
-                    const fileListArray = files
-                        .slice(0, 50)
-                        .map(f => f.path);
-
-                    return NextResponse.json({
-                        mode: "command",
-                        command: "list_files",
-                        repo: activeRepoName,
-                        answer: `Here are the top ${fileListArray.length} files in ${activeRepoName}:\n\n${fileListArray.join("\n")}`,
-                        files: fileListArray
-                    });
-                } catch (e) {
-                    console.error("Command execution failed:", e);
-                    return NextResponse.json({ answer: "Failed to fetch file list from GitHub." });
-                }
-            }
-            return NextResponse.json({
-                mode: "command",
-                repo: activeRepoName,
-                answer: "Command not recognized. Try 'list files'."
-            });
-        }
 
         // --- TIMELINE MODE (REAL GITHUB HISTORY) ---
         if (mode === "timeline") {
@@ -277,6 +251,30 @@ ${diffSummary}${extraFiles}`;
         }
 
         // --- FLOW MODE (EXISTING LOGIC) ---
+        // 3. Handle Command Mode (File Listing)
+        if (mode === "command") {
+            console.log("[Ask] Command mode detected");
+
+            // Fetch ALL files (filter=false)
+            const allFiles = await fetchRepoTree(repoUrl, false);
+
+            // Parse limit from query (e.g. "list 10 files")
+            const limitMatch = query.match(/(\d+)\s+files?/);
+            const limit = limitMatch ? parseInt(limitMatch[1]) : allFiles.length;
+
+            const filesToShow = allFiles.slice(0, limit);
+            const fileList = filesToShow.map(f => `- ${f.path}`).join("\n");
+
+            const answer = `Here are the files in **${activeRepoName}**:\n\n${fileList}\n\n${limit < allFiles.length ? `*(Showing ${limit} of ${allFiles.length} files)*` : `*(Total ${allFiles.length} files)*`}`;
+
+            return NextResponse.json({
+                mode: "command",
+                repo: activeRepoName,
+                answer,
+                context: []
+            });
+        }
+
         // 4. Generate Embedding for Query
         const queryEmbedding = await embedText(cleanQuery);
 

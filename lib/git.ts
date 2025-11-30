@@ -2,19 +2,43 @@ import { Octokit } from "octokit";
 import { GitFileNode, CommitInfo } from "@/types";
 
 const octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN,
+    auth: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
 });
 
-function parseRepoUrl(url: string): { owner: string; repo: string } {
+export function parseGithubRepo(url: string): { owner: string; repo: string } {
     const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
     if (!match) {
         throw new Error("Invalid GitHub URL");
     }
-    return { owner: match[1], repo: match[2].replace(".git", "") };
+    return { owner: match[1], repo: match[2].replace(/\.git$/, "") };
+}
+
+// Alias for backward compatibility if needed, or just replace usages.
+// The existing code uses parseRepoUrl, so we can just export the new one and update internal calls.
+const parseRepoUrl = parseGithubRepo;
+
+const BINARY_EXTENSIONS = new Set([
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "mp3", "ico", "exe", "pdf",
+    "zip", "tar", "gz", "7z", "rar", "jar", "war", "ear", "class", "pyc", "woff", "woff2", "ttf", "eot",
+    // Documentation extensions to ignore
+    "md", "txt", "rtf", "docx", "doc", "odt"
+]);
+
+const IGNORED_FILES = new Set([
+    "license", "changelog", "contributing", "readme", "notice", "authors", "patents", "copying"
+]);
+
+export interface FileCommit {
+    sha: string;
+    authorName: string;
+    authorEmail: string | null;
+    date: string;          // ISO timestamp
+    message: string;
+    htmlUrl: string;       // direct URL to the commit on GitHub
 }
 
 export async function fetchRepoTree(repoUrl: string): Promise<GitFileNode[]> {
-    const { owner, repo } = parseRepoUrl(repoUrl);
+    const { owner, repo } = parseGithubRepo(repoUrl);
 
     try {
         // 1. Get default branch
@@ -32,9 +56,32 @@ export async function fetchRepoTree(repoUrl: string): Promise<GitFileNode[]> {
             recursive: "1",
         });
 
-        // 3. Filter for files (blobs) and map to GitFileNode
+        // 3. Filter for files (blobs) and exclude binaries/docs
         return treeData.tree
-            .filter((node) => node.type === "blob")
+            .filter((node) => {
+                if (node.type !== "blob" || !node.path) return false;
+
+                const fileName = node.path.split("/").pop()?.toLowerCase();
+                if (!fileName) return false;
+
+                // Check exact ignored filenames (without extension logic if they have none, or just basename)
+                // We check the full basename (e.g. "license", "license.txt")
+                // But usually license is just LICENSE.
+                // Let's check if the basename *starts with* or *is* one of the ignored files?
+                // The user said "LICENSE, CHANGELOG".
+                if (IGNORED_FILES.has(fileName.split(".")[0])) return false;
+
+                const ext = fileName.split(".").pop();
+
+                // If no extension (e.g. Dockerfile), keep it unless it's in IGNORED_FILES
+                if (!ext || fileName.indexOf(".") === -1) {
+                    if (IGNORED_FILES.has(fileName)) return false;
+                    return true;
+                }
+
+                // Check extensions
+                return !BINARY_EXTENSIONS.has(ext);
+            })
             .map((node) => ({
                 path: node.path || "",
                 type: "file",
@@ -46,7 +93,7 @@ export async function fetchRepoTree(repoUrl: string): Promise<GitFileNode[]> {
 }
 
 export async function fetchFileContent(repoUrl: string, filePath: string): Promise<string> {
-    const { owner, repo } = parseRepoUrl(repoUrl);
+    const { owner, repo } = parseGithubRepo(repoUrl);
 
     try {
         const { data } = await octokit.request("GET /repos/{owner}/{repo}/contents/{path}", {
@@ -68,7 +115,7 @@ export async function fetchFileContent(repoUrl: string, filePath: string): Promi
 }
 
 export async function fetchCommitHistory(repoUrl: string): Promise<CommitInfo[]> {
-    const { owner, repo } = parseRepoUrl(repoUrl);
+    const { owner, repo } = parseGithubRepo(repoUrl);
 
     try {
         const { data } = await octokit.request("GET /repos/{owner}/{repo}/commits", {
@@ -86,5 +133,117 @@ export async function fetchCommitHistory(repoUrl: string): Promise<CommitInfo[]>
     } catch (error) {
         console.error("Error fetching commit history:", error);
         return [];
+    }
+}
+
+export async function fetchFileCommits(
+    repoUrl: string,
+    filePath: string,
+    limit: number = 20
+): Promise<FileCommit[]> {
+    const { owner, repo } = parseGithubRepo(repoUrl);
+
+    try {
+        const { data } = await octokit.request("GET /repos/{owner}/{repo}/commits", {
+            owner,
+            repo,
+            path: filePath,
+            per_page: limit,
+            headers: {
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+        });
+
+        return data.map((commit: any) => ({
+            sha: commit.sha,
+            authorName: commit.commit.author?.name || "Unknown",
+            authorEmail: commit.commit.author?.email || null,
+            date: commit.commit.author?.date || "",
+            message: commit.commit.message,
+            htmlUrl: commit.html_url,
+        }));
+    } catch (error) {
+        console.error(`Error fetching commits for ${filePath}:`, error);
+        return [];
+    }
+}
+
+export async function resolveFilePathByName(
+    repoUrl: string,
+    fileName: string
+): Promise<string | null> {
+    try {
+        const files = await fetchRepoTree(repoUrl);
+
+        // 1. Look for exact match by basename
+        const matches = files.filter(f => f.path.split("/").pop() === fileName);
+
+        if (matches.length === 0) {
+            return null;
+        }
+
+        // 2. Prefer root file if available
+        const rootMatch = matches.find(f => f.path === fileName);
+        if (rootMatch) {
+            return rootMatch.path;
+        }
+
+        // 3. Otherwise pick the first match
+        return matches[0].path;
+    } catch (error) {
+        console.error("Error resolving file path:", error);
+        return null;
+    }
+}
+
+export interface CommitDetails {
+    sha: string;
+    message: string;
+    author: string;
+    date: string;
+    htmlUrl: string;
+    stats: {
+        total: number;
+        additions: number;
+        deletions: number;
+    };
+    files: {
+        filename: string;
+        status: string; // "modified", "added", "removed"
+        additions: number;
+        deletions: number;
+    }[];
+}
+
+export async function fetchCommitDetails(repoUrl: string, sha: string): Promise<CommitDetails | null> {
+    const { owner, repo } = parseGithubRepo(repoUrl);
+    try {
+        const { data } = await octokit.request("GET /repos/{owner}/{repo}/commits/{ref}", {
+            owner,
+            repo,
+            ref: sha
+        });
+
+        return {
+            sha: data.sha,
+            message: data.commit.message,
+            author: data.commit.author?.name || "Unknown",
+            date: data.commit.author?.date || "",
+            htmlUrl: data.html_url,
+            stats: {
+                total: data.stats?.total || 0,
+                additions: data.stats?.additions || 0,
+                deletions: data.stats?.deletions || 0,
+            },
+            files: data.files?.map((f: any) => ({
+                filename: f.filename,
+                status: f.status,
+                additions: f.additions,
+                deletions: f.deletions
+            })) || []
+        };
+    } catch (error) {
+        console.error("Error fetching commit details:", error);
+        return null;
     }
 }

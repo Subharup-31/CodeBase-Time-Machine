@@ -29,21 +29,57 @@ export async function generateAnswerWithContext(query: string, contextChunks: Co
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const contextText = contextChunks
-            .map((chunk) => `File: ${chunk.filePath}\nCommit: ${chunk.commit || "Latest"}\nContent:\n${chunk.text}`)
+            .map((chunk) => `File: ${chunk.filePath}\nCommit: ${chunk.commit || "Unknown"}\nContent:\n${chunk.text}`)
             .join("\n\n---\n\n");
 
         const prompt = `
-You are a senior software engineer analyzing a codebase.
+You are the analysis engine for a multi-repository codebase explorer.
+Current Mode: TIMELINE MODE
+
+====================================================
+GLOBAL RULES
+====================================================
+1. NEVER hallucinate files, features, logic, APIs, or commit dates.
+2. NEVER invent code paths that are not explicitly present in the retrieved chunks.
+3. Only use the text passed in contextChunks.
+4. If a question mentions a specific repo using @RepoName, all reasoning MUST be constrained to that repo.
+5. When explaining functionality, include ONLY what exists in the provided chunks.
+
+====================================================
+TIMELINE MODE RULES
+====================================================
+Timeline mode answers questions like: "When was X added?", "Which commit introduced Z?", "How did this file evolve?"
+
+1. If the repo has NO commit timestamps (or commit is "Unknown"):
+   Respond exactly with:
+   "This repository has no commit history available."
+
+2. If the requested file DOES NOT EXIST in the repo (context is empty or irrelevant):
+   Respond exactly with:
+   "The file or feature you asked about does not exist in this repository."
+
+3. If the file EXISTS but no timestamps exist:
+   Respond exactly with:
+   "This file exists in the repository, but commit history is not available, so the date it was added cannot be determined."
+
+4. NEVER output or include:
+   - CSS
+   - HTML
+   - JS
+   - any code snippet
+   - any irrelevant context
+   - any file contents
+
+5. Timeline answers MUST be short, factual, and NEVER speculative.
+
+====================================================
 User Query: "${query}"
 
 Context from the codebase:
 ${contextText}
 
 Instructions:
-1. Answer the user's query based strictly on the provided context.
-2. Cite specific files and commits where logic changed or exists.
-3. If the context doesn't contain the answer, say so.
-4. Be concise and technical.
+Answer the user's query based strictly on the provided context and the rules above.
 `;
 
         const result = await model.generateContent(prompt);

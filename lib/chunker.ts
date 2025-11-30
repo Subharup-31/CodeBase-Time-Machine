@@ -15,7 +15,7 @@ export function chunkText(text: string, filePath: string, commit?: string, size:
 
         chunks.push({
             id: uuidv4(),
-            text: chunkText,
+            text: `File: ${filePath}\n\n${chunkText}`,
             filePath,
             commit
         });

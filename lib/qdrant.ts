@@ -1,5 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { CodeChunk } from "@/types";
+import crypto from "crypto";
 
 const client = new QdrantClient({
     url: process.env.QDRANT_URL,
@@ -8,7 +9,15 @@ const client = new QdrantClient({
 
 const VECTOR_SIZE = 768; // Matches Gemini models/text-embedding-004
 
-async function ensureCollection(collectionName: string) {
+export function getCollectionName(repoName: string): string {
+    // Sanitize repo name to be safe for Qdrant collection names
+    // Allow alphanumeric, underscores, and hyphens. 
+    // We'll also add a hash to ensure uniqueness if needed, but for now just sanitizing is good.
+    const sanitized = repoName.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+    return `code_chunks_${sanitized}`;
+}
+
+export async function ensureRepoCollection(collectionName: string) {
     try {
         const result = await client.getCollections();
         const exists = result.collections.some((c) => c.name === collectionName);
@@ -27,13 +36,22 @@ async function ensureCollection(collectionName: string) {
     }
 }
 
+export async function deleteRepoCollection(collectionName: string) {
+    try {
+        await client.deleteCollection(collectionName);
+        console.log(`Deleted collection ${collectionName}`);
+    } catch (error) {
+        console.error(`Error deleting collection ${collectionName}:`, error);
+    }
+}
+
 export async function storeVectors(collectionName: string, chunks: CodeChunk[]): Promise<void> {
     if (!process.env.QDRANT_URL) {
         console.warn("QDRANT_URL missing, skipping vector storage");
         return;
     }
 
-    await ensureCollection(collectionName);
+    await ensureRepoCollection(collectionName);
 
     try {
         const points = chunks.map((chunk) => ({
@@ -65,6 +83,15 @@ export async function searchVectors(collectionName: string, queryVector: number[
     }
 
     try {
+        // Check if collection exists first to avoid error spam
+        const result = await client.getCollections();
+        const exists = result.collections.some((c) => c.name === collectionName);
+
+        if (!exists) {
+            console.warn(`Collection ${collectionName} does not exist.`);
+            return [];
+        }
+
         const results = await client.search(collectionName, {
             vector: queryVector,
             limit,
@@ -76,6 +103,7 @@ export async function searchVectors(collectionName: string, queryVector: number[
             text: res.payload?.text as string,
             filePath: res.payload?.filePath as string,
             commit: res.payload?.commit as string,
+            score: res.score,
             embedding: [], // Don't need to return embedding
         }));
     } catch (error) {

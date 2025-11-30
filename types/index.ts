@@ -4,6 +4,7 @@ export interface CodeChunk {
     embedding?: number[];
     filePath: string;
     commit?: string;
+    score?: number;
 }
 
 export interface RepoProcessResponse {

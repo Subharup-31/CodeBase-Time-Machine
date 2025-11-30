@@ -1,21 +1,32 @@
-export type Mode = "timeline" | "flow";
+export type Mode = "timeline" | "flow" | "command";
 
 export function detectMode(query: string): Mode {
-    const timelineKeywords = ["when", "introduced", "commit", "added", "removed", "bug", "origin", "first", "changed", "history", "who"];
-    const flowKeywords = ["how", "flow", "explain", "architecture", "structure", "logic", "what happens", "work", "understand"];
-
     const lowerQuery = query.toLowerCase();
 
-    // Check for timeline keywords first
+    // Command detection
+    if (lowerQuery.match(/^(list|show)\s+(\d+\s+)?files?/)) {
+        return "command";
+    }
+
+    const timelineKeywords = [
+        "when", "commit", "added", "introduced", "changed", "bug", "removed", "origin",
+        "history", "log", "updated", "last commit", "commits"
+    ];
+
+    const flowKeywords = [
+        "how", "flow", "explain", "logic", "architecture", "what happens", "walk me through"
+    ];
+
+    // Check for timeline keywords
     if (timelineKeywords.some(k => lowerQuery.includes(k))) {
         return "timeline";
     }
 
-    // Check for flow keywords
+    // Check for flow keywords (not strictly necessary since it's the default, but good for clarity)
     if (flowKeywords.some(k => lowerQuery.includes(k))) {
         return "flow";
     }
 
-    // Default to flow if ambiguous, as it's more likely what a user wants for general questions
+    // Default to flow if ambiguous
     return "flow";
 }

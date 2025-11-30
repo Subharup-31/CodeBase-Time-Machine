@@ -1,34 +1,161 @@
 import { FlowAnalysis } from "./flowEngine";
 
-export function generateFlowPrompt(query: string, analysis: FlowAnalysis): string {
-    return `
-You are an expert software architect explaining code logic to a beginner.
+export function generateFlowPrompt(query: string, analysis: FlowAnalysis, context: string): string {
+   if (analysis.empty) {
+      return `
+You are the FLOW MODE engine.
+
+Your job:
+Explain real logic and architecture from the provided code chunks only.
+
+STRICT RULES:
+1. Ignore ALL Markdown files.
+   Ignore files ending with:
+   - .md
+   - .markdown
+   - README*
+
+2. Only use REAL code files:
+   Allowed:
+   - .js, .jsx
+   - .ts, .tsx
+   - .html (ALWAYS include)
+   - .py
+   - .go
+   - .java
+
+3. Never use documentation, summaries, or written descriptions
+   to generate logic.  
+   Only use executable code.
+
+4. If after filtering, the code has NO meaningful logic:
+   reply exactly:
+   **“This repository does not contain meaningful logic for this feature.”**
+
+5. Output must contain:
+   • Summary (3–4 lines)  
+   • Step-by-step flow  
+   • Key functions/APIs  
+   • Mermaid diagram  
+   • Nothing else (no source context)
+
+6. If the user references a file name directly
+   (checkout.html, auth.js, etc.)
+   focus ONLY on that file + related logic files.
+
+
+FORMAT:
+Summary:
+• 3–4 line overview of the feature
+
+Flow:
+1. Step
+2. Step
+3. Step
+4. Step
+
+Key Functions:
+• fn1()
+• fn2()
+• fn3()
+
+\`\`\`mermaid
+<diagram>
+\`\`\`
+
 User Query: "${query}"
 
 Code Analysis:
 - Functions: ${analysis.functions.join(", ")}
 - Events: ${analysis.events.join(", ")}
+- Routes: ${analysis.routes.join(", ")}
 - API Calls: ${analysis.apiCalls.join(", ")}
-- Components: ${analysis.components.join(", ")}
+- State Changes: ${analysis.stateChanges.join(", ")}
+- DOM Interactions: ${analysis.domInteractions.join(", ")}
+- Firebase Calls: ${analysis.firebaseCalls.join(", ")}
 
-Instructions:
-1. Explain the flow in simple, non-technical terms first.
-2. Provide a numbered step-by-step breakdown of exactly what happens.
-3. Generate a Mermaid.js diagram code block (graph TD) that visualizes this flow.
-4. Do NOT mention specific file paths or commit hashes. Focus on the LOGIC.
-5. If the flow involves UI -> Logic -> Backend, make sure to show that.
+Source Code Context:
+\`\`\`typescript
+${context.slice(0, 15000)}
+\`\`\`
+`;
+   }
 
-Output Format:
-[Simple Explanation]
+   return `
+You are the FLOW MODE engine.
 
-**Step-by-Step Flow:**
-1. ...
-2. ...
+Your job:
+Explain real logic and architecture from the provided code chunks only.
 
-**Mermaid Diagram:**
+STRICT RULES:
+1. Ignore ALL Markdown files.
+   Ignore files ending with:
+   - .md
+   - .markdown
+   - README*
+
+2. Only use REAL code files:
+   Allowed:
+   - .js, .jsx
+   - .ts, .tsx
+   - .html (ALWAYS include)
+   - .py
+   - .go
+   - .java
+
+3. Never use documentation, summaries, or written descriptions
+   to generate logic.  
+   Only use executable code.
+
+4. If after filtering, the code has NO meaningful logic:
+   reply exactly:
+   **“This repository does not contain meaningful logic for this feature.”**
+
+5. Output must contain:
+   • Summary (3–4 lines)  
+   • Step-by-step flow  
+   • Key functions/APIs  
+   • Mermaid diagram  
+   • Nothing else (no source context)
+
+6. If the user references a file name directly
+   (checkout.html, auth.js, etc.)
+   focus ONLY on that file + related logic files.
+
+
+FORMAT:
+Summary:
+• 3–4 line overview of the feature
+
+Flow:
+1. Step
+2. Step
+3. Step
+4. Step
+
+Key Functions:
+• fn1()
+• fn2()
+• fn3()
+
 \`\`\`mermaid
-graph TD
-...
+<diagram>
+\`\`\`
+
+User Query: "${query}"
+
+Code Analysis:
+- Functions: ${analysis.functions.join(", ")}
+- Events: ${analysis.events.join(", ")}
+- Routes: ${analysis.routes.join(", ")}
+- API Calls: ${analysis.apiCalls.join(", ")}
+- State Changes: ${analysis.stateChanges.join(", ")}
+- DOM Interactions: ${analysis.domInteractions.join(", ")}
+- Firebase Calls: ${analysis.firebaseCalls.join(", ")}
+
+Source Code Context:
+\`\`\`typescript
+${context.slice(0, 15000)}
 \`\`\`
 `;
 }

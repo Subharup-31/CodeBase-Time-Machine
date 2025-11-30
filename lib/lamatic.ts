@@ -3,8 +3,8 @@ import { chunkText } from "./chunker";
 import { embedText } from "./gemini";
 import { storeVectors } from "./qdrant";
 
-export async function runPipeline(repoUrl: string): Promise<boolean> {
-    console.log(`Starting pipeline for ${repoUrl}`);
+export async function runPipeline(repoUrl: string, collectionName: string = "codebase"): Promise<boolean> {
+    console.log(`Starting pipeline for ${repoUrl} into collection ${collectionName}`);
 
     try {
         // 1. Fetch history (just to verify repo access and get latest commit info)
@@ -24,7 +24,8 @@ export async function runPipeline(repoUrl: string): Promise<boolean> {
 
         for (const file of files) {
             // Skip non-code files or large assets
-            if (!isProcessableFile(file.path)) continue;
+            // Skip empty paths
+            if (!file.path) continue;
 
             try {
                 const content = await fetchFileContent(repoUrl, file.path);
@@ -39,7 +40,7 @@ export async function runPipeline(repoUrl: string): Promise<boolean> {
                     chunk.embedding = await embedText(chunk.text);
                 }
 
-                await storeVectors("codebase", chunks);
+                await storeVectors(collectionName, chunks);
                 processedFiles++;
             } catch (err) {
                 console.error(`Failed to process file ${file.path}:`, err);
@@ -54,7 +55,4 @@ export async function runPipeline(repoUrl: string): Promise<boolean> {
     }
 }
 
-function isProcessableFile(path: string): boolean {
-    const extensions = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".c", ".cpp", ".h", ".md", ".css", ".html"];
-    return extensions.some(ext => path.endsWith(ext));
-}
+

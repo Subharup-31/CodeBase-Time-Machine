@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import RepoInput from "@/app/components/RepoInput";
 import AskSection from "@/app/components/AskSection";
 import { Separator } from "@/components/ui/separator";
@@ -22,7 +23,9 @@ export default function TimeMachinePage() {
                         <span className="bg-gray-50 px-2 text-gray-500 font-medium tracking-wider">Then Ask Questions</span>
                     </div>
                 </div>
-                <AskSection />
+                <Suspense fallback={<div>Loading...</div>}>
+                    <AskSection />
+                </Suspense>
             </div>
         </div>
     );

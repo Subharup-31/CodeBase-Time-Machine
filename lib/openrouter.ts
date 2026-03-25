@@ -409,3 +409,5 @@ export async function getSingleEmbedding(text: string): Promise<number[]> {
     const results = await getEmbeddings(text);
     return results[0];
 }
+
+                                                                                          

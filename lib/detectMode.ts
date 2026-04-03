@@ -68,3 +68,5 @@ export function detectMode(query: string): Mode {
     // Default to flow if ambiguous
     return "flow";
 }
+
+                                                                                                    

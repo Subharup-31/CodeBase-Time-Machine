@@ -18,3 +18,5 @@ export async function GET(req: Request, { params }: { params: { repoName: string
         return NextResponse.json({ error: "Failed to get vector count", details: error }, { status: 500 });
     }
 }
+
+                                                                                                                               

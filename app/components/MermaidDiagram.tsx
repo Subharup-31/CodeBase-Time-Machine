@@ -184,3 +184,5 @@ export default function MermaidDiagram({ chart, onRegenerate }: MermaidDiagramPr
         </>
     );
 }
+
+                                                                                                                                   

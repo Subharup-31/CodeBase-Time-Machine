@@ -147,4 +147,4 @@ export function alignMultipleCodeSequences(sequences: string[][]): string {
     return consensus.join("\n");
 }
 
-                                                                                                                                            
+                                                                                                                                                

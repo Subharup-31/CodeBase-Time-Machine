@@ -127,7 +127,7 @@ export function alignMultipleCodeSequences(sequences: string[][]): string {
     for (let k = 1; k < sequences.length; k++) {
         const current = sequences[k];
         const alignment = alignCodeLines(consensus, current);
-        
+
         // Build new aligned representation
         const newConsensus: string[] = [];
         for (const pair of alignment) {
@@ -147,4 +147,4 @@ export function alignMultipleCodeSequences(sequences: string[][]): string {
     return consensus.join("\n");
 }
 
-                                                                                                                                                            
+

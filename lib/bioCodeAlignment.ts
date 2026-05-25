@@ -39,7 +39,7 @@ Clearly highlight in your response:
 - [MUTATED: filePath]: File-specific variations or custom modifications.
 
 2. ANCESTRAL STATE SYNTHESIS (GENE SPLICING)
-Synthesize a single, optimized, parameterized "Ancestral Function" (Core Genotype) that replaces all variants. 
+Synthesize a single, optimized, parameterized "Ancestral Function" (Core Genotype) that replaces all variants.
 Extract the file-specific custom mutations into clean configuration options or arguments (e.g. callbacks, options object).
 
 3. REFACTORING PLAN
@@ -95,4 +95,4 @@ ${formattedCodeInputs}
     }
 }
 
-                                                                                                                                                                                    
+

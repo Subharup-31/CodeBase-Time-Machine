@@ -184,7 +184,7 @@ export async function callOpenRouter(
             }
         } catch (error: any) {
             console.warn(`[OpenRouter] Failed request with model ${model}:`, error.message);
-            
+
             // Check if model returned an error stating it doesn't support tools/function calling
             const errMsg = error.message.toLowerCase();
             if (
@@ -206,7 +206,7 @@ export async function callOpenRouter(
             } else {
                 lastError = error;
             }
-            
+
             // Short delay to avoid pounding the endpoint
             await new Promise(resolve => setTimeout(resolve, 500));
         }
@@ -262,7 +262,7 @@ If you have the final answer and do not need to call any more tools, respond nor
 
     // Try parsing tool call JSON from markdown or raw text
     const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/({[\s\S]*?})/);
-    
+
     if (jsonMatch) {
         try {
             const parsed = JSON.parse(jsonMatch[1].trim());
@@ -304,7 +304,7 @@ function cleanMessagesForTextOnly(messages: OpenRouterMessage[]): OpenRouterMess
             };
         }
         if (msg.role === "assistant" && msg.tool_calls) {
-            const toolCallText = msg.tool_calls.map(tc => 
+            const toolCallText = msg.tool_calls.map(tc =>
                 `Called Tool: ${tc.function.name} with Arguments: ${tc.function.arguments}`
             ).join("\n");
             return {
@@ -410,4 +410,4 @@ export async function getSingleEmbedding(text: string): Promise<number[]> {
     return results[0];
 }
 
-                                                                                                                                                
+

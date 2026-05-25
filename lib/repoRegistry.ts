@@ -69,6 +69,7 @@ type RepoUpdatePayload = {
     status?: string;
     progress?: number;
     progress_message?: string;
+    error_message?: string;
 };
 
 export async function updateRepo(name: string, patch: Partial<RepoMetadata>): Promise<void> {
@@ -82,6 +83,7 @@ export async function updateRepo(name: string, patch: Partial<RepoMetadata>): Pr
     if (patch.status !== undefined) updateData.status = patch.status
     if (patch.progress !== undefined) updateData.progress = patch.progress
     if (patch.progressMessage !== undefined) updateData.progress_message = patch.progressMessage
+    if (patch.errorMessage !== undefined) updateData.error_message = patch.errorMessage
 
     const { error } = await supabase
         .from('repositories')
@@ -141,4 +143,4 @@ export async function repoExists(name: string): Promise<boolean> {
     return !!repo
 }
 
-                                                                                                         
+

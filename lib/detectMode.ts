@@ -69,4 +69,4 @@ export function detectMode(query: string): Mode {
     return "flow";
 }
 
-                                                                                                    
+

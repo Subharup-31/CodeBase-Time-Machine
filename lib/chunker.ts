@@ -9,7 +9,7 @@ export function chunkText(text: string, filePath: string, commit?: string, size:
         const end = Math.min(start + size, text.length);
         const chunkText = text.slice(start, end);
 
-        // Simple logic to avoid cutting words in half if possible, 
+        // Simple logic to avoid cutting words in half if possible,
         // but for code it's better to just chunk by lines or strict size.
         // Here we just do strict size for simplicity in this mock.
 
@@ -26,4 +26,4 @@ export function chunkText(text: string, filePath: string, commit?: string, size:
     return chunks;
 }
 
-                                                                                                                                    
+

@@ -66,7 +66,7 @@ TONE & STYLE:
 1. Dry, factual, and concise.
 2. Similar to GitLens or Sourcegraph output.
 3. No conversational filler.
-   
+
    MERMAID DIAGRAM RULES:
    1. Do NOT use special characters ( () {} [] ) inside node labels without quotes.
       BAD: A[User (Client)]
@@ -124,10 +124,10 @@ export async function expandKeywordsWithAI(keywords: string[]): Promise<string[]
         const prompt = `
         You are a code search assistant.
         The user is searching for files related to these keywords: ${JSON.stringify(keywords)}.
-        
+
         Generate a JSON array of 5-10 technical synonyms, related file names, or coding concepts that might appear in a codebase for these terms.
         Example: ["login"] -> ["auth", "authentication", "signin", "session", "jwt", "user_controller"]
-        
+
         Return ONLY the JSON array of strings. No markdown, no explanations.
         `;
 
@@ -232,7 +232,7 @@ The user will provide either a GitHub URL or raw repository contents.
 Your task is to produce a complete, structured, end-to-end developer onboarding report for the entire codebase.
 
 CRITICAL INSTRUCTION:
-The user is a BEGINNER. 
+The user is a BEGINNER.
 - Use simple, plain English.
 - Avoid complex jargon where possible, or explain it immediately if necessary.
 - Use ANALOGIES to explain concepts (e.g., "Think of this module as the traffic controller...").
@@ -740,4 +740,4 @@ export async function generateFlowModeAnswer(prompt: string): Promise<string> {
     }
 }
 
-                                                                                                                                                          
+

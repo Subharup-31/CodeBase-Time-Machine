@@ -67,3 +67,82 @@ CREATE INDEX IF NOT EXISTS repositories_user_id_idx ON repositories (user_id);
 -- ALTER TABLE repositories ADD COLUMN IF NOT EXISTS graph_data JSONB;
 -- ALTER TABLE repositories ADD COLUMN IF NOT EXISTS error_message TEXT;
 
+
+-- ============================================================
+-- Phase 2 Migration: Scalable graph storage via adjacency tables
+-- Run this after the base repositories table migration
+-- ============================================================
+
+-- Stores individual code symbol nodes (one row per unique version of a function/class)
+CREATE TABLE IF NOT EXISTS genetic_nodes (
+    id UUID PRIMARY KEY,
+    repo_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('function', 'class')),
+    file_path TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    change_type TEXT NOT NULL CHECK (change_type IN ('origin', 'mutation', 'speciation', 'deletion')),
+    body TEXT,
+    calls TEXT[], -- array of called symbol names
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL
+);
+
+-- Stores directed edges between nodes (parent -> child lineage)
+CREATE TABLE IF NOT EXISTS genetic_edges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    repo_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    parent_node_id UUID NOT NULL REFERENCES genetic_nodes(id) ON DELETE CASCADE,
+    child_node_id UUID NOT NULL REFERENCES genetic_nodes(id) ON DELETE CASCADE,
+    UNIQUE (parent_node_id, child_node_id)
+);
+
+-- Tracks which commits have been fully indexed (for incremental indexing)
+CREATE TABLE IF NOT EXISTS indexed_commits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    repo_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    commit_sha TEXT NOT NULL,
+    indexed_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL,
+    UNIQUE (repo_id, commit_sha)
+);
+
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS genetic_nodes_repo_id_idx ON genetic_nodes (repo_id);
+CREATE INDEX IF NOT EXISTS genetic_nodes_name_idx ON genetic_nodes (name);
+CREATE INDEX IF NOT EXISTS genetic_nodes_commit_sha_idx ON genetic_nodes (commit_sha);
+CREATE INDEX IF NOT EXISTS genetic_nodes_user_repo_idx ON genetic_nodes (user_id, repo_id);
+CREATE INDEX IF NOT EXISTS genetic_edges_repo_id_idx ON genetic_edges (repo_id);
+CREATE INDEX IF NOT EXISTS genetic_edges_child_node_idx ON genetic_edges (child_node_id);
+CREATE INDEX IF NOT EXISTS indexed_commits_repo_id_idx ON indexed_commits (repo_id);
+
+-- RLS Policies for genetic_nodes
+ALTER TABLE genetic_nodes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own nodes"
+    ON genetic_nodes FOR SELECT
+    USING (auth.uid() = user_id);
+CREATE POLICY "Service role can manage nodes"
+    ON genetic_nodes FOR ALL
+    USING (true);
+
+-- RLS Policies for genetic_edges
+ALTER TABLE genetic_edges ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view edges for their repos"
+    ON genetic_edges FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM repositories r
+            WHERE r.id = genetic_edges.repo_id
+            AND r.user_id = auth.uid()
+        )
+    );
+CREATE POLICY "Service role can manage edges"
+    ON genetic_edges FOR ALL
+    USING (true);
+
+-- RLS Policies for indexed_commits
+ALTER TABLE indexed_commits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Service role can manage indexed commits"
+    ON indexed_commits FOR ALL
+    USING (true);
+
+

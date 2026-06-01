@@ -3,6 +3,9 @@ import { getEmbeddings } from "./openrouter";
 import { storeVectors } from "./pinecone";
 import { CodeChunk } from "@/types";
 import { createAdminClient } from "./supabase/serviceRole";
+import { saveGraphNodes, loadGraphNodes, getIndexedCommitShas, markCommitsAsIndexed, getRepoId } from "./graphStore";
+import { Config } from "./config";
+
 
 import { v4 as uuidv4 } from "uuid";
 import Parser from "tree-sitter";
@@ -59,7 +62,7 @@ export function calculateCodeSimilarity(codeA: string, codeB: string): number {
 }
 
 const controlKeywords = new Set([
-    "if", "for", "while", "catch", "switch", "return", "def", "class", "func", "function", 
+    "if", "for", "while", "catch", "switch", "return", "def", "class", "func", "function",
     "import", "require", "await", "yield", "let", "const", "var", "else", "try", "throw"
 ]);
 
@@ -100,12 +103,12 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
                 const name = match[2];
                 const startLine = i;
                 const declarationLine = line;
-                
+
                 // Calculate base indentation
                 const baseIndent = line.search(/\S/);
                 const bodyLines: string[] = [line];
                 i++;
-                
+
                 // Read ahead until we find a line with less or equal indentation (excluding blank lines)
                 while (i < lines.length) {
                     const nextLine = lines[i];
@@ -119,7 +122,7 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
                     bodyLines.push(nextLine);
                     i++;
                 }
-                
+
                 const bodyText = bodyLines.join("\n");
                 symbols.push({
                     name,
@@ -143,29 +146,29 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
             // Match func declarations: func Name(...) or func (r Rec) Name(...)
             const funcMatch = line.match(/^func\s+(?:\([^\)]+\)\s+)?(\w+)\s*\(/);
             const structMatch = line.match(/^type\s+(\w+)\s+struct/);
-            
+
             if ((funcMatch || structMatch) && line.includes("{")) {
                 const name = funcMatch ? funcMatch[1] : structMatch![1];
                 const type = funcMatch ? "function" : "class";
                 const signature = line.trim().replace(/{$/, "").trim();
-                
+
                 let bracketCount = 0;
                 let bodyLines: string[] = [];
                 let foundEnd = false;
-                
+
                 for (let j = i; j < lines.length; j++) {
                     bodyLines.push(lines[j]);
                     const openCount = (lines[j].match(/{/g) || []).length;
                     const closeCount = (lines[j].match(/}/g) || []).length;
                     bracketCount += openCount - closeCount;
-                    
+
                     if (bracketCount <= 0) {
                         i = j;
                         foundEnd = true;
                         break;
                     }
                 }
-                
+
                 if (foundEnd) {
                     const bodyText = bodyLines.join("\n");
                     symbols.push({
@@ -188,30 +191,30 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
             const line = lines[i];
             // Matches class declarations or functions/methods
             const match = line.match(/\b(class|void|int|string|bool|float|double|public|private|protected|static|fn)\s+(\w+)\s*[\(<\s{]/i);
-            
+
             if (match && line.includes("{")) {
                 const keyword = match[1].toLowerCase();
                 const type = (keyword === "class" || keyword === "struct") ? "class" : "function";
                 const name = match[2];
                 const signature = line.trim().replace(/{$/, "").trim();
-                
+
                 let bracketCount = 0;
                 let bodyLines: string[] = [];
                 let foundEnd = false;
-                
+
                 for (let j = i; j < lines.length; j++) {
                     bodyLines.push(lines[j]);
                     const openCount = (lines[j].match(/{/g) || []).length;
                     const closeCount = (lines[j].match(/}/g) || []).length;
                     bracketCount += openCount - closeCount;
-                    
+
                     if (bracketCount <= 0) {
                         i = j;
                         foundEnd = true;
                         break;
                     }
                 }
-                
+
                 if (foundEnd) {
                     const bodyText = bodyLines.join("\n");
                     symbols.push({
@@ -228,7 +231,7 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
             i++;
         }
     }
-    
+
     return symbols;
 }
 
@@ -286,7 +289,7 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
                         const body = node.text;
                         const sigLines = body.split("\n");
                         const signature = sigLines.length > 0 ? sigLines[0].trim() : body;
-                        
+
                         symbols.push({
                             name,
                             type: symType,
@@ -375,38 +378,116 @@ export async function processRepositoryPhylogenetics(
     // 1. Fetch recent commits
     const commits = await fetchCommitHistory(repoUrl, commitLimit);
     if (commits.length === 0) return 0;
-    
+
     // Process commits chronologically (oldest to newest)
     const sortedCommits = [...commits].reverse();
-    
-    onProgress?.({ message: `Fetching details for ${sortedCommits.length} commits in parallel...`, percent: 10 });
-    // Pre-fetch commit details in parallel to avoid sequential API wait latency
-    console.log(`[Phylogenetics] Pre-fetching details for ${sortedCommits.length} commits in parallel...`);
-    const allCommitDetails = await Promise.all(
-        sortedCommits.map(commit => fetchCommitDetails(repoUrl, commit.sha))
-    );
-    onProgress?.({ message: `Building code evolution graph...`, percent: 25 });
-    
-    const graph: Record<string, GeneticNode> = {};
+
+    // Check if we can index incrementally
+    let graph: Record<string, GeneticNode> = {};
     let previousCommitSymbols: CodeSymbol[] = [];
     let previousNodeMap: Record<string, string> = {}; // Symbol Signature -> GeneticNode.id
+    let commitsToIndex = sortedCommits;
+    let baseCommitsList: any[] = [];
 
-    for (let index = 0; index < sortedCommits.length; index++) {
-        const commit = sortedCommits[index];
+    try {
+        const cleanRepoName = collectionName.replace("code_chunks_", "");
+        const repoId = await getRepoId(cleanRepoName, userId);
+        if (repoId) {
+            const existingGraph = await loadGraphNodes(repoId);
+            const indexedShas = await getIndexedCommitShas(repoId);
+
+            if (indexedShas.size > 0) {
+                const adminClient = createAdminClient();
+                const { data: latestCommit } = await adminClient
+                    .from('indexed_commits')
+                    .select('commit_sha')
+                    .eq('repo_id', repoId)
+                    .order('indexed_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                const lastIndexedSha = latestCommit?.commit_sha;
+                if (lastIndexedSha) {
+                    console.log(`[Phylogenetics] Found existing index. Last indexed commit: ${lastIndexedSha.slice(0, 7)}`);
+
+                    // Check if the latest commit in history is the same as lastIndexedSha
+                    if (commits.length > 0 && commits[0].sha === lastIndexedSha) {
+                        console.log(`[Phylogenetics] Repository is already up to date.`);
+                        onProgress?.({ message: `Repository is already up to date.`, percent: 100 });
+                        return Object.keys(existingGraph).length;
+                    }
+
+                    // Find where the lastIndexedSha is in our fetched commits history
+                    const lastIdx = commits.findIndex(c => c.sha === lastIndexedSha);
+                    if (lastIdx !== -1) {
+                        // Commits to process are the ones since lastIndexedSha, processed chronologically (oldest to newest)
+                        commitsToIndex = [...commits.slice(0, lastIdx)].reverse();
+                        console.log(`[Phylogenetics] Incremental index: processing ${commitsToIndex.length} new commits.`);
+
+                        // Copy existing nodes into graph
+                        Object.assign(graph, existingGraph);
+
+                        // Reconstruct active symbols at lastIndexedSha
+                        const allowedCommits = indexedShas;
+                        const nodesUpToTarget = Object.values(graph).filter(n => allowedCommits.has(n.commitSha));
+
+                        const parentIdsSet = new Set<string>();
+                        nodesUpToTarget.forEach(n => {
+                            n.parentIds.forEach(pid => parentIdsSet.add(pid));
+                        });
+
+                        const activeNodes = nodesUpToTarget.filter(n => !parentIdsSet.has(n.id) && n.changeType !== 'deletion');
+
+                        // Set indexer loop state
+                        previousCommitSymbols = activeNodes.map(n => ({
+                            name: n.name,
+                            type: n.type,
+                            signature: "", // Not strictly needed for mapping, but matching interface
+                            body: n.body,
+                            filePath: n.filePath,
+                            commitSha: n.commitSha,
+                            calls: n.calls
+                        }));
+
+                        previousNodeMap = {};
+                        activeNodes.forEach(n => {
+                            const sig = `${n.filePath}::${n.name}`;
+                            previousNodeMap[sig] = n.id;
+                        });
+                    } else {
+                        console.log(`[Phylogenetics] Last indexed commit not found in recent history limit. Falling back to full rebuild.`);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.warn("[Phylogenetics] Error checking existing index for incremental run:", err);
+    }
+
+    onProgress?.({ message: `Fetching details for ${commitsToIndex.length} commits in parallel...`, percent: 10 });
+    // Pre-fetch commit details in parallel to avoid sequential API wait latency
+    console.log(`[Phylogenetics] Pre-fetching details for ${commitsToIndex.length} commits in parallel...`);
+    const allCommitDetails = await Promise.all(
+        commitsToIndex.map(commit => fetchCommitDetails(repoUrl, commit.sha))
+    );
+    onProgress?.({ message: `Building code evolution graph...`, percent: 25 });
+
+    for (let index = 0; index < commitsToIndex.length; index++) {
+        const commit = commitsToIndex[index];
         const details = allCommitDetails[index];
         if (!details || !details.files) continue;
 
-        console.log(`[Phylogenetics] Analyzing commit [${index + 1}/${sortedCommits.length}]: ${commit.sha.slice(0, 7)}...`);
+        console.log(`[Phylogenetics] Analyzing commit [${index + 1}/${commitsToIndex.length}]: ${commit.sha.slice(0, 7)}...`);
         onProgress?.({
-            message: `Tracing symbol lineage (${index + 1}/${sortedCommits.length}): ${commit.message.slice(0, 50)}...`,
-            percent: 25 + Math.floor((index / sortedCommits.length) * 40),
+            message: `Tracing symbol lineage (${index + 1}/${commitsToIndex.length}): ${commit.message.slice(0, 50)}...`,
+            percent: 25 + Math.floor((index / commitsToIndex.length) * 40),
         });
 
         const currentCommitSymbols: CodeSymbol[] = [];
         const currentNodeMap: Record<string, string> = {};
 
         // Filter and process only relevant code files
-        const codeFiles = details.files.filter(f => 
+        const codeFiles = details.files.filter(f =>
             /\.(ts|js|tsx|jsx|py|go|java|cpp|cs)$/i.test(f.filename)
         );
 
@@ -460,7 +541,7 @@ export async function processRepositoryPhylogenetics(
                         sig: `${p.filePath}::${p.name}`,
                         similarity: calculateCodeSimilarity(currentSym.body, p.body)
                     }))
-                    .filter(item => item.similarity > 0.75); // Greater than 75% similarity
+                    .filter(item => item.similarity > Config.SPECIATION_SIMILARITY_THRESHOLD); // Configurable via SPECIATION_SIMILARITY_THRESHOLD env var
 
                 if (prevSimilarMatches.length > 0) {
                     // Linked as a speciation/divergence from parent
@@ -519,14 +600,12 @@ export async function processRepositoryPhylogenetics(
 
     // Save Compiled Dependency Graph (CDG) to Supabase (serverless-safe)
     const cleanRepoName = collectionName.replace("code_chunks_", "");
-    const adminClient = createAdminClient();
-    await adminClient
-        .from('repositories')
-        .update({ graph_data: graph })
-        .eq('name', cleanRepoName)
-        .eq('user_id', userId);
-
-    console.log(`[Phylogenetics] Saved code graph with ${Object.keys(graph).length} nodes to Supabase.`);
+    const repoId = await getRepoId(cleanRepoName, userId);
+    if (repoId) {
+        await saveGraphNodes(repoId, userId, graph);
+        await markCommitsAsIndexed(repoId, commitsToIndex.map(c => c.sha));
+        console.log(`[Phylogenetics] Saved code graph with ${Object.keys(graph).length} nodes and commits to Supabase relational tables.`);
+    }
 
     // 3. Upload embeddings of current active symbols to Qdrant for semantic lookups
     const activeNodes = Object.values(graph).filter(n => n.changeType !== "deletion");
@@ -541,12 +620,12 @@ export async function processRepositoryPhylogenetics(
             const chunkSize = 15;
             const overlap = 5;
             let subIdx = 0;
-            
+
             for (let start = 0; start < bodyLines.length; start += (chunkSize - overlap)) {
                 const end = Math.min(start + chunkSize, bodyLines.length);
                 const chunkLines = bodyLines.slice(start, end);
                 const subBody = chunkLines.join("\n");
-                
+
                 const formattedText = [
                     `Parent Function: ${node.name}`,
                     `Type: ${node.type}`,
@@ -555,14 +634,14 @@ export async function processRepositoryPhylogenetics(
                     `Sub-chunk Code [Lines ${start + 1}-${end}]:`,
                     subBody
                 ].join("\n");
-                
+
                 chunks.push({
                     id: `${node.id}-sub-${subIdx++}`,
                     text: formattedText,
                     filePath: node.filePath,
                     commit: node.commitSha
                 });
-                
+
                 if (end === bodyLines.length) break;
             }
         } else {
@@ -575,7 +654,7 @@ export async function processRepositoryPhylogenetics(
                 `Code:`,
                 node.body
             ].join("\n");
-            
+
             chunks.push({
                 id: node.id,
                 text: formattedText,
@@ -612,7 +691,7 @@ export async function processRepositoryPhylogenetics(
     return chunks.length;
 }
 
- 
- 
 
-                                                                                                                                                                               
+
+
+

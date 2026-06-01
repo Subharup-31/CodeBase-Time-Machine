@@ -2,6 +2,7 @@ import { GeneticNode } from "./phylogeneticIndexer";
 import { searchVectors } from "./pinecone";
 import { getSingleEmbedding, callOpenRouter } from "./openrouter";
 import { createAdminClient } from "./supabase/serviceRole";
+import { loadGraphNodes, getRepoId } from "./graphStore";
 
 /**
  * Loads the Compiled Dependency Graph (CDG) for a repository from Supabase.
@@ -9,19 +10,12 @@ import { createAdminClient } from "./supabase/serviceRole";
  */
 export async function loadCodeGraph(collectionName: string, userId: string): Promise<Record<string, GeneticNode>> {
     const cleanRepoName = collectionName.replace("code_chunks_", "");
-    const adminClient = createAdminClient();
-    const { data, error } = await adminClient
-        .from('repositories')
-        .select('graph_data')
-        .eq('name', cleanRepoName)
-        .eq('user_id', userId)
-        .single();
-
-    if (error || !data?.graph_data) {
-        console.warn(`[Phylogenetic RAG] No graph found in Supabase for ${cleanRepoName} (user: ${userId})`);
+    const repoId = await getRepoId(cleanRepoName, userId);
+    if (!repoId) {
+        console.warn(`[Phylogenetic RAG] No repo found for ${cleanRepoName}`);
         return {};
     }
-    return data.graph_data as Record<string, GeneticNode>;
+    return loadGraphNodes(repoId);
 }
 
 export interface SymbolLineageResult {
@@ -74,8 +68,8 @@ export async function getSymbolLineage(
 
     // Find siblings (other nodes that share the same parents)
     const parentSet = new Set(latestSymbol.parentIds);
-    const siblings = nodes.filter(n => 
-        n.id !== latestSymbol.id && 
+    const siblings = nodes.filter(n =>
+        n.id !== latestSymbol.id &&
         n.changeType !== "deletion" &&
         n.parentIds.some(p => parentSet.has(p))
     );
@@ -84,7 +78,7 @@ export async function getSymbolLineage(
     // Formula: (number of mutations in the symbol's direct lineage / total commits in graph) * 10
     const mutationCount = lineage.filter(n => n.changeType === "mutation").length;
     const uniqueCommits = new Set(nodes.map(n => n.commitSha)).size;
-    const entropyScore = uniqueCommits > 0 
+    const entropyScore = uniqueCommits > 0
         ? Math.min(10, parseFloat(((mutationCount / uniqueCommits) * 10).toFixed(2)))
         : 0;
 
@@ -109,7 +103,7 @@ export interface EntropyHotspot {
 export async function getEvolutionaryHotspots(collectionName: string, userId: string): Promise<EntropyHotspot[]> {
     const graph = await loadCodeGraph(collectionName, userId);
     const nodes = Object.values(graph);
-    
+
     // Group nodes by symbol signature (filePath::name) to count their mutation history
     const symbolMutations: Record<string, { name: string, filePath: string, count: number }> = {};
     const uniqueCommits = new Set(nodes.map(n => n.commitSha)).size;
@@ -117,21 +111,21 @@ export async function getEvolutionaryHotspots(collectionName: string, userId: st
     for (const node of nodes) {
         if (node.changeType === "deletion") continue;
         const sig = `${node.filePath}::${node.name}`;
-        
+
         if (!symbolMutations[sig]) {
             symbolMutations[sig] = { name: node.name, filePath: node.filePath, count: 0 };
         }
-        
+
         if (node.changeType === "mutation") {
             symbolMutations[sig].count++;
         }
     }
 
     const hotspots = Object.values(symbolMutations).map(sym => {
-        const score = uniqueCommits > 0 
+        const score = uniqueCommits > 0
             ? Math.min(10, parseFloat(((sym.count / uniqueCommits) * 10).toFixed(2)))
             : 0;
-            
+
         return {
             name: sym.name,
             filePath: sym.filePath,
@@ -176,10 +170,10 @@ export async function retrieveExpandedAndRerankedContext(
         // Try to identify the matching function or class node in our graph
         const funcNameMatch = chunk.text.match(/^(?:Parent\s+)?(?:Function|Class):\s*(\w+)/m);
         const name = funcNameMatch ? funcNameMatch[1] : null;
-        
+
         let graphContext = "";
         let finalCodeBody = chunk.text;
-        
+
         if (name) {
             const node = nodes.find(n => n.name === name && n.filePath === chunk.filePath && n.changeType !== "deletion");
             if (node) {
@@ -197,7 +191,7 @@ export async function retrieveExpandedAndRerankedContext(
 
                 // Ancestry
                 const parentNames = node.parentIds.map(id => graph[id]?.name).filter(Boolean);
-                
+
                 // Call Graph: locate who calls this, and who this calls
                 const callees = node.calls || [];
                 const callers = nodes
@@ -244,11 +238,11 @@ Evaluate the chunks. Identify the indices of the top 5 most useful chunks. Retur
 
         const reply = response.content || "";
         const jsonMatch = reply.match(/\[\s*\d+\s*(?:,\s*\d+\s*)*\]/);
-        
+
         if (jsonMatch) {
             const indices: number[] = JSON.parse(jsonMatch[0]);
             console.log(`[Reranker] Model selected indices:`, indices);
-            
+
             // Filter and sort the enriched candidates based on the LLM decision
             const reranked = indices
                 .slice(0, limit)
@@ -268,7 +262,7 @@ Evaluate the chunks. Identify the indices of the top 5 most useful chunks. Retur
 }
 
 
- 
- 
 
-                                                                                                                                           
+
+
+

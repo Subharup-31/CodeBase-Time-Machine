@@ -1,5 +1,5 @@
 import { fetchCommitHistory, fetchCommitDetails } from "./git";
-import { getEmbeddings } from "./openrouter";
+import { getEmbeddings, callOpenRouter } from "./openrouter";
 import { storeVectors } from "./pinecone";
 import { CodeChunk } from "@/types";
 import { v4 as uuidv4 } from "uuid";
@@ -7,6 +7,37 @@ import { v4 as uuidv4 } from "uuid";
 export interface ProgressEvent {
     message: string;
     percent: number; // 0-100
+}
+
+/**
+ * Uses an LLM to generate a semantic summary of a code diff.
+ * Explains WHAT changed, not just the raw patch lines.
+ * Only runs if ENABLE_SEMANTIC_SUMMARIES=true in env.
+ */
+async function generateDiffSummary(
+    filename: string,
+    commitMessage: string,
+    patch: string
+): Promise<string> {
+    if (process.env.ENABLE_SEMANTIC_SUMMARIES !== 'true') return '';
+    const truncatedPatch = patch.slice(0, 1500);
+    try {
+        const response = await callOpenRouter([
+            {
+                role: "system",
+                content: "You are a senior software engineer. Given a code diff, provide a 2-3 sentence semantic summary of what actually changed in terms of behavior, logic, or structure. Be specific and technical. Do not describe the diff format itself."
+            },
+            {
+                role: "user",
+                content: `File: ${filename}\nCommit Message: ${commitMessage}\n\nDiff:\n${truncatedPatch}\n\nSummarize what changed semantically in 2-3 sentences:`
+            }
+        ], {
+            model: "meta-llama/llama-3.2-3b-instruct:free"
+        });
+        return response.content || '';
+    } catch (e) {
+        return ''; // Graceful fallback — no summary
+    }
 }
 
 /**
@@ -40,13 +71,13 @@ export async function processRepositoryEvolution(
             try {
                 console.log(`[Evolution] Fetching details for commit: ${commit.sha.slice(0, 7)}...`);
                 const details = await fetchCommitDetails(repoUrl, commit.sha);
-                
+
                 processedCommits++;
                 onProgress?.({
                     message: `Analyzed ${processedCommits}/${commits.length} commits...`,
                     percent: 10 + Math.floor((processedCommits / commits.length) * 40),
                 });
-                
+
                 return details;
             } catch (err) {
                 console.error(`[Evolution] Error fetching commit details for ${commit.sha}:`, err);
@@ -74,6 +105,12 @@ export async function processRepositoryEvolution(
             }
 
             // Format the code evolution chunk text
+            const semanticSummary = await generateDiffSummary(
+                file.filename,
+                details.message.split("\n")[0],
+                patchContent
+            );
+
             const formattedText = [
                 `Commit: ${details.sha.slice(0, 7)}`,
                 `Author: ${details.author}`,
@@ -81,9 +118,10 @@ export async function processRepositoryEvolution(
                 `Message: ${details.message.split("\n")[0]}`,
                 `File: ${file.filename}`,
                 `Action: ${file.status}`,
-                `Diff Patch:${isTruncated ? " (Truncated)" : ""}`,
+                semanticSummary ? `Semantic Summary: ${semanticSummary}` : "",
+                `Diff Patch${isTruncated ? " (Truncated)" : ""}:`,
                 patchContent
-            ].join("\n");
+            ].filter(Boolean).join("\n");
 
             chunks.push({
                 id: uuidv4(),
@@ -138,4 +176,4 @@ export async function processRepositoryEvolution(
     return chunks.length;
 }
 
-                                                                                                                  
+

@@ -11,7 +11,7 @@ async function updateRepoProgress(
     patch: { status?: string; progress?: number; progressMessage?: string; indexedAt?: string }
 ) {
     const adminClient = createAdminClient();
-    
+
     const updateData: any = {};
     if (patch.status !== undefined) updateData.status = patch.status;
     if (patch.progress !== undefined) updateData.progress = patch.progress;
@@ -26,9 +26,9 @@ async function updateRepoProgress(
 }
 
 export const indexRepository = inngest.createFunction(
-    { 
-        id: "index-repository", 
-        name: "Index Repository", 
+    {
+        id: "index-repository",
+        name: "Index Repository",
         retries: 2,
         triggers: [{ event: "repo/index.requested" }]
     },
@@ -40,10 +40,10 @@ export const indexRepository = inngest.createFunction(
             // 1. Initial State Update
             await step.run("set-status-indexing", async () => {
                 await ensureRepoCollection(collectionName);
-                await updateRepoProgress(userId, repoName, { 
-                    status: 'indexing', 
-                    progress: 5, 
-                    progressMessage: "Starting indexing process..." 
+                await updateRepoProgress(userId, repoName, {
+                    status: 'indexing',
+                    progress: 5,
+                    progressMessage: "Starting indexing process..."
                 });
             });
 
@@ -121,4 +121,90 @@ export const indexRepository = inngest.createFunction(
     }
 );
 
-                                                                                                              
+export const syncRepository = inngest.createFunction(
+    {
+        id: "sync-repository",
+        name: "Sync Repository (Incremental)",
+        retries: 2,
+        triggers: [{ event: "repo/sync.requested" }]
+    },
+    async ({ event, step }) => {
+        const { userId, repoUrl, repoName, repoId } = event.data;
+        const collectionName = getCollectionName(repoName);
+
+        try {
+            await step.run("set-status-syncing", async () => {
+                await updateRepoProgress(userId, repoName, {
+                    status: 'syncing',
+                    progress: 5,
+                    progressMessage: "Checking for new commits..."
+                });
+            });
+
+            const { evolutionChunks, symbolChunks } = await step.run("process-incremental", async () => {
+                const { getIndexedCommitShas } = await import("@/lib/graphStore");
+                const { fetchCommitHistory } = await import("@/lib/git");
+                const alreadyIndexed = await getIndexedCommitShas(repoId);
+
+                const allCommits = await fetchCommitHistory(repoUrl, 200);
+                const newCommits = allCommits.filter(c => !alreadyIndexed.has(c.sha));
+
+                if (newCommits.length === 0) {
+                    await updateRepoProgress(userId, repoName, {
+                        status: 'ready',
+                        progress: 100,
+                        progressMessage: "Already up to date. No new commits."
+                    });
+                    return { evolutionChunks: 0, symbolChunks: 0 };
+                }
+
+                console.log(`[Sync] Found ${newCommits.length} new commits to index.`);
+                await updateRepoProgress(userId, repoName, {
+                    progress: 20,
+                    progressMessage: `Processing ${newCommits.length} new commits...`
+                });
+
+                // Run incremental evolution diff indexing
+                const evolutionChunks = await processRepositoryEvolution(
+                    repoUrl, collectionName, newCommits.length
+                );
+
+                // Run incremental phylogenetics only on new commits
+                const symbolChunks = await processRepositoryPhylogenetics(
+                    repoUrl, collectionName, newCommits.length, userId
+                );
+
+                return { evolutionChunks, symbolChunks };
+            });
+
+            await step.run("set-status-ready", async () => {
+                const totalChunks = evolutionChunks + symbolChunks;
+                await updateRepoProgress(userId, repoName, {
+                    status: 'ready',
+                    progress: 100,
+                    progressMessage: `Sync complete. Indexed ${totalChunks} new chunks.`,
+                    indexedAt: new Date().toISOString()
+                });
+            });
+
+            return { success: true, evolutionChunks, symbolChunks };
+        } catch (err: any) {
+            await step.run("set-status-error", async () => {
+                const adminClient = createAdminClient();
+                await adminClient
+                    .from('repositories')
+                    .update({
+                        status: 'error',
+                        progress_message: `Sync failed: ${err?.message || 'Unknown error'}`,
+                        error_message: err?.message || 'Unknown error'
+                    })
+                    .eq('name', repoName)
+                    .eq('user_id', userId);
+            });
+            throw err;
+        }
+    }
+);
+
+
+

@@ -168,4 +168,74 @@ export async function searchVectors(collectionName: string, queryVector: number[
     }
 }
 
-                                                                                                                         
+export async function storeChatMemory(
+    chatId: string,
+    messageId: string,
+    role: string,
+    content: string,
+    embedding: number[],
+    symbolName?: string
+): Promise<void> {
+    if (!process.env.PINECONE_API_KEY) return;
+    try {
+        const index = client.index(INDEX_NAME);
+        await index.namespace("chat_memories").upsert({
+            records: [{
+                id: messageId,
+                values: embedding,
+                metadata: {
+                    chatId,
+                    role,
+                    content,
+                    symbolName: symbolName || ""
+                }
+            }]
+        });
+        console.log(`[Pinecone] Stored chat memory ${messageId} in namespace chat_memories.`);
+    } catch (error) {
+        console.error("Error storing chat memory in Pinecone:", error);
+    }
+}
+
+export async function retrieveChatMemories(
+    chatId: string,
+    queryVector: number[],
+    limit: number = 3,
+    symbolName?: string
+): Promise<{ role: string; content: string; symbolName?: string }[]> {
+    if (!process.env.PINECONE_API_KEY) return [];
+    try {
+        const indexList = await client.listIndexes();
+        const exists = indexList.indexes?.some((idx) => idx.name === INDEX_NAME);
+        if (!exists) return [];
+
+        const index = client.index(INDEX_NAME);
+        const filter: any = { chatId: { "$eq": chatId } };
+        if (symbolName) {
+            filter.symbolName = { "$eq": symbolName };
+        }
+
+        const queryResponse = await index.namespace("chat_memories").query({
+            vector: queryVector,
+            topK: limit,
+            includeMetadata: true,
+            filter
+        });
+
+        if (!queryResponse.matches) return [];
+
+        return queryResponse.matches.map((match) => {
+            const meta = match.metadata as any;
+            return {
+                role: meta?.role || "user",
+                content: meta?.content || "",
+                symbolName: meta?.symbolName
+            };
+        });
+    } catch (error) {
+        console.error("Error retrieving chat memories from Pinecone:", error);
+        return [];
+    }
+}
+
+

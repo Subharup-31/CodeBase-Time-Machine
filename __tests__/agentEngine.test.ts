@@ -30,7 +30,19 @@ describe('isAgenticQuery', () => {
         expect(isAgenticQuery('REFACTOR this code')).toBe(true);
         expect(isAgenticQuery('WHO introduced this bug')).toBe(true);
     });
+
+    it('handles very long queries without performance degradation', () => {
+        const longQuery = 'explain '.repeat(200) + 'this function';
+        const start = Date.now();
+        isAgenticQuery(longQuery);
+        expect(Date.now() - start).toBeLessThan(50); // must complete in <50ms
+    });
+
+    it('returns a boolean for any input', () => {
+        expect(typeof isAgenticQuery('random query')).toBe('boolean');
+        expect(typeof isAgenticQuery('')).toBe('boolean');
+    });
 });
 
- 
- 
+
+

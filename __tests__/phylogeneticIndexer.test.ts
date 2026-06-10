@@ -5,61 +5,48 @@ import { describe, it, expect, vi } from 'vitest';
 import { calculateCodeSimilarity, extractSymbols } from '../lib/phylogeneticIndexer';
 import { getEvolutionaryHotspots } from '../lib/phylogeneticRAG';
 
-// Mock createAdminClient from serviceRole to intercept Supabase queries
-vi.mock('../lib/supabase/serviceRole', () => {
-    return {
-        createAdminClient: () => ({
-            from: () => ({
-                select: () => ({
-                    eq: () => ({
-                        eq: () => ({
-                            single: () => Promise.resolve({
-                                data: {
-                                    graph_data: {
-                                        "node-1": {
-                                            id: "node-1",
-                                            name: "foo",
-                                            type: "function",
-                                            filePath: "lib/foo.ts",
-                                            commitSha: "sha-1",
-                                            parentIds: [],
-                                            changeType: "origin",
-                                            body: "function foo() {}",
-                                            calls: []
-                                        },
-                                        "node-2": {
-                                            id: "node-2",
-                                            name: "foo",
-                                            type: "function",
-                                            filePath: "lib/foo.ts",
-                                            commitSha: "sha-2",
-                                            parentIds: ["node-1"],
-                                            changeType: "mutation",
-                                            body: "function foo() { console.log(1); }",
-                                            calls: []
-                                        },
-                                        "node-3": {
-                                            id: "node-3",
-                                            name: "bar",
-                                            type: "function",
-                                            filePath: "lib/bar.ts",
-                                            commitSha: "sha-2",
-                                            parentIds: [],
-                                            changeType: "origin",
-                                            body: "function bar() {}",
-                                            calls: []
-                                        }
-                                    }
-                                },
-                                error: null
-                            })
-                        })
-                    })
-                })
-            })
-        })
-    };
-});
+// Mock graphStore so loadCodeGraph uses the relational path
+vi.mock('../lib/graphStore', () => ({
+    getRepoId: vi.fn().mockResolvedValue('repo-test'),
+    loadGraphNodes: vi.fn().mockResolvedValue({
+        'node-1': {
+            id: 'node-1',
+            name: 'foo',
+            type: 'function',
+            filePath: 'lib/foo.ts',
+            commitSha: 'sha-1',
+            parentIds: [],
+            changeType: 'origin',
+            body: 'function foo() {}',
+            calls: []
+        },
+        'node-2': {
+            id: 'node-2',
+            name: 'foo',
+            type: 'function',
+            filePath: 'lib/foo.ts',
+            commitSha: 'sha-2',
+            parentIds: ['node-1'],
+            changeType: 'mutation',
+            body: 'function foo() { console.log(1); }',
+            calls: []
+        },
+        'node-3': {
+            id: 'node-3',
+            name: 'bar',
+            type: 'function',
+            filePath: 'lib/bar.ts',
+            commitSha: 'sha-2',
+            parentIds: [],
+            changeType: 'origin',
+            body: 'function bar() {}',
+            calls: []
+        }
+    }),
+    saveGraphNodes: vi.fn().mockResolvedValue(undefined),
+    markCommitsAsIndexed: vi.fn().mockResolvedValue(undefined),
+    getIndexedCommitShas: vi.fn().mockResolvedValue(new Set()),
+}));
 
 describe('calculateCodeSimilarity', () => {
     it('returns 1.0 for identical code', () => {

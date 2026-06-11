@@ -3,6 +3,7 @@ import { searchVectors } from "./pinecone";
 import { fetchCommitHistory, fetchCommitDetails, fetchRepoTree, fetchFileContent, searchCode } from "./git";
 import { getSymbolLineage, getEvolutionaryHotspots, retrieveExpandedAndRerankedContext } from "./phylogeneticRAG";
 import { performBioAlignmentAndSynthesis } from "./bioCodeAlignment";
+import { Config } from "./config";
 
 export type ToolDefinition = {
     name: string;
@@ -292,7 +293,7 @@ export async function runSubAgent(
 ): Promise<string> {
     console.log(`[Sub-Agent] Spawning '${agentType}' with instruction: "${instruction}"`);
     const systemPrompt = agentType === "historian" ? HISTORIAN_SYSTEM_PROMPT : INSPECTOR_SYSTEM_PROMPT;
-    
+
     // Sub-agents are restricted to their domains, so we filter tools
     const allowedTools = TOOLS.filter(t => {
         if (agentType === "historian") {
@@ -316,13 +317,13 @@ export async function runOrchestrator(
     onToken?: (token: string) => void
 ): Promise<string> {
     console.log(`[Orchestrator] Processing user query: "${query}"`);
-    
+
     // 1. Classification
-    if (!isAgenticQuery(query)) {
+    if (!(await classifyQueryIntent(query))) {
         console.log(`[Orchestrator] Non-agentic query detected. Bypassing agent loop for Direct RAG.`);
         return await runDirectRAG(query, collectionName, userId, onToken);
     }
-    
+
     console.log(`[Orchestrator] Agentic query detected. Running full ReAct agent loop.`);
     // Orchestrator has access only to delegation tool
     const orchestratorTools = TOOLS.filter(t => t.name === "delegateToSubAgent");
@@ -349,14 +350,14 @@ async function runAgentLoop(
     ];
 
     let turns = 0;
-    const maxTurns = 8; // Prevent infinite execution loops
+    const maxTurns = Config.MAX_AGENT_TURNS; // Configurable via MAX_AGENT_TURNS env var
 
     while (turns < maxTurns) {
         turns++;
         console.log(`[Agent Loop] Turn ${turns}...`);
 
         try {
-            const responseMessage = await callOpenRouter(messages, { 
+            const responseMessage = await callOpenRouter(messages, {
                 tools: availableTools,
                 onToken
             });
@@ -399,18 +400,67 @@ async function runAgentLoop(
     return "Agent loop reached maximum turns without finalizing.";
 }
 
+const INTENT_CLASSIFIER_PROMPT = `
+You are a query intent classifier for a code intelligence system.
+Classify the user query into one of two categories:
+
+- "agentic": The query requires multi-step reasoning, searching git history, tracing
+  code evolution, finding duplicates/clones, performing refactoring, generating reports,
+  or analyzing temporal changes across commits.
+- "direct_rag": The query is a simple factual lookup about what a function/class does,
+  how something is implemented, or general code explanation — answerable from the
+  current codebase state without traversing git history.
+
+Respond with ONLY one word: "agentic" or "direct_rag".
+
+Examples:
+- "what does getUserSession do" → direct_rag
+- "who introduced the race condition in payment module" → agentic
+- "explain the auth middleware" → direct_rag
+- "show me the lineage of parseToken" → agentic
+- "what was refactored in the last sprint" → agentic
+- "how does database pooling work here" → direct_rag
+`;
+
+const intentCache = new Map<string, boolean>();
+
+export async function classifyQueryIntent(query: string): Promise<boolean> {
+    const cacheKey = query.toLowerCase().trim().slice(0, 100);
+    if (intentCache.has(cacheKey)) {
+        return intentCache.get(cacheKey)!;
+    }
+
+    try {
+        const response = await callOpenRouter([
+            { role: "system", content: INTENT_CLASSIFIER_PROMPT },
+            { role: "user", content: query }
+        ], {
+            model: "meta-llama/llama-3.2-3b-instruct:free"
+        });
+        const reply = (response.content || "").toLowerCase().trim();
+        const isAgentic = reply.startsWith("agentic");
+        intentCache.set(cacheKey, isAgentic);
+        return isAgentic;
+    } catch (e) {
+        console.warn("[Intent Classifier] LLM classifier failed, falling back to keyword matching:", e);
+        return isAgenticQueryFallback(query);
+    }
+}
+
 /**
- * Helper to classify if a query requires multi-step agent reasoning or can use a fast RAG bypass
+ * Helper to classify if a query requires multi-step agent reasoning or can use a fast RAG bypass.
+ * Used as a fallback when the LLM classifier is unavailable.
  */
+/** Exported for testing and backward compat. The primary classifier is classifyQueryIntent (async/LLM-based). */
 export function isAgenticQuery(query: string): boolean {
     const lower = query.toLowerCase();
-    
+
     // Keywords related to clone alignment / refactoring
     const cloneKeywords = ["refactor", "align", "duplicate", "clone", "copy-paste", "mcsa"];
-    
+
     // Keywords related to Git timeline / regressions / evolution / history
     const historyKeywords = ["break", "broke", "regression", "commit", "git", "who", "when", "introduce", "timeline", "history", "entropy", "volatility", "volatile", "hotspot"];
-    
+
     // Keywords related to specialized report generation
     const reportKeywords = ["security scan", "vulnerability", "health score", "health report", "test case", "unit test", "generate test"];
 
@@ -420,6 +470,9 @@ export function isAgenticQuery(query: string): boolean {
 
     return matchesClone || matchesHistory || matchesReport;
 }
+
+// Internal alias used by classifyQueryIntent as fallback
+const isAgenticQueryFallback = isAgenticQuery;
 
 /**
  * Runs a fast, single-turn RAG retrieval and streams the LLM response directly
@@ -431,10 +484,10 @@ export async function runDirectRAG(
     onToken?: (token: string) => void
 ): Promise<string> {
     console.log(`[Direct RAG] Executing direct RAG path for query: "${query}"`);
-    
+
     // 1. Retrieve expanded and reranked context
     const contextText = await retrieveExpandedAndRerankedContext(query, collectionName, userId, 8);
-    
+
     // 2. Compile direct RAG prompt
     const prompt = `
 You are an advanced codebase assistant. Answer the user's question about the codebase.
@@ -450,7 +503,7 @@ Instructions:
 - Use code snippets where appropriate.
 - Respond in markdown format.
 `;
-    
+
     // 3. Call OpenRouter with streaming
     const response = await callOpenRouter(
         [
@@ -461,8 +514,8 @@ Instructions:
             onToken
         }
     );
-    
+
     return response.content || "";
 }
 
-                                                                                                                                           
+

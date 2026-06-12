@@ -2,21 +2,13 @@ import { GeneticNode } from "./phylogeneticIndexer";
 import { searchVectors } from "./pinecone";
 import { getSingleEmbedding, callOpenRouter } from "./openrouter";
 import { createAdminClient } from "./supabase/serviceRole";
-import { loadGraphNodes, getRepoId } from "./graphStore";
-
-/**
- * Loads the Compiled Dependency Graph (CDG) for a repository from Supabase.
- * Async and serverless-safe — no filesystem reads.
- */
-export async function loadCodeGraph(collectionName: string, userId: string): Promise<Record<string, GeneticNode>> {
-    const cleanRepoName = collectionName.replace("code_chunks_", "");
-    const repoId = await getRepoId(cleanRepoName, userId);
-    if (!repoId) {
-        console.warn(`[Phylogenetic RAG] No repo found for ${cleanRepoName}`);
-        return {};
-    }
-    return loadGraphNodes(repoId);
-}
+import {
+    getRepoId,
+    fetchSymbolAncestorsFromDB,
+    fetchSymbolSiblingsFromDB,
+    fetchEvolutionaryHotspotsFromDB,
+    EvolutionaryHotspot
+} from "./graphStore";
 
 export interface SymbolLineageResult {
     symbol: GeneticNode;
@@ -27,57 +19,66 @@ export interface SymbolLineageResult {
 
 /**
  * Traces the phylogenetic lineage and locates siblings for a given symbol name.
+ * DB-driven, edge-safe traversal.
  */
 export async function getSymbolLineage(
     symbolName: string,
     collectionName: string,
     userId: string
 ): Promise<SymbolLineageResult | null> {
-    const graph = await loadCodeGraph(collectionName, userId);
-    const nodes = Object.values(graph);
-
-    // Find the latest active version of the symbol (exclude deletions)
-    const latestSymbol = nodes
-        .filter(n => n.name.toLowerCase() === symbolName.toLowerCase() && n.changeType !== "deletion")
-        .sort((a, b) => b.commitSha.localeCompare(a.commitSha))[0]; // Prefer most recent
-
-    if (!latestSymbol) {
+    const cleanRepoName = collectionName.replace("code_chunks_", "");
+    const repoId = await getRepoId(cleanRepoName, userId);
+    if (!repoId) {
+        console.warn(`[Phylogenetic RAG] No repo found for ${cleanRepoName}`);
         return null;
     }
 
-    // Trace ancestors recursively
-    const lineage: GeneticNode[] = [];
-    const visited = new Set<string>();
+    const adminClient = createAdminClient();
 
-    function trace(nodeId: string) {
-        if (visited.has(nodeId)) return;
-        visited.add(nodeId);
+    // 1. Find the latest active version of the symbol (exclude deletions)
+    const { data: latestSymbolRows, error: searchError } = await adminClient
+        .from('genetic_nodes')
+        .select('*')
+        .eq('repo_id', repoId)
+        .eq('name', symbolName)
+        .neq('change_type', 'deletion')
+        .order('commit_sha', { ascending: false })
+        .limit(1);
 
-        const node = graph[nodeId];
-        if (node) {
-            lineage.push(node);
-            for (const parentId of node.parentIds) {
-                trace(parentId);
-            }
-        }
+    if (searchError || !latestSymbolRows || latestSymbolRows.length === 0) {
+        return null;
     }
 
-    for (const parentId of latestSymbol.parentIds) {
-        trace(parentId);
-    }
+    const row = latestSymbolRows[0];
+    const latestSymbol: GeneticNode = {
+        id: row.id,
+        name: row.name,
+        type: row.type as any,
+        filePath: row.file_path,
+        commitSha: row.commit_sha,
+        changeType: row.change_type as any,
+        body: row.body || "",
+        calls: row.calls || [],
+        parentIds: [],
+        structuralHash: row.structural_hash || ""
+    };
 
-    // Find siblings (other nodes that share the same parents)
-    const parentSet = new Set(latestSymbol.parentIds);
-    const siblings = nodes.filter(n =>
-        n.id !== latestSymbol.id &&
-        n.changeType !== "deletion" &&
-        n.parentIds.some(p => parentSet.has(p))
-    );
+    // 2. Fetch ancestors recursively via database CTE RPC function
+    const lineage = await fetchSymbolAncestorsFromDB(latestSymbol.id);
 
-    // Calculate Evolutionary Entropy (Volatility)
+    // 3. Fetch siblings via database join query
+    const siblings = await fetchSymbolSiblingsFromDB(latestSymbol.id);
+
+    // 4. Calculate Evolutionary Entropy (Volatility)
     // Formula: (number of mutations in the symbol's direct lineage / total commits in graph) * 10
     const mutationCount = lineage.filter(n => n.changeType === "mutation").length;
-    const uniqueCommits = new Set(nodes.map(n => n.commitSha)).size;
+
+    const { count: totalCommits } = await adminClient
+        .from('indexed_commits')
+        .select('*', { count: 'exact', head: true })
+        .eq('repo_id', repoId);
+
+    const uniqueCommits = totalCommits || 0;
     const entropyScore = uniqueCommits > 0
         ? Math.min(10, parseFloat(((mutationCount / uniqueCommits) * 10).toFixed(2)))
         : 0;
@@ -99,49 +100,20 @@ export interface EntropyHotspot {
 
 /**
  * Scans the graph to identify the top 5 most volatile (entropy-heavy) symbols.
+ * Offloaded to PostgreSQL functions.
  */
-export async function getEvolutionaryHotspots(collectionName: string, userId: string): Promise<EntropyHotspot[]> {
-    const graph = await loadCodeGraph(collectionName, userId);
-    const nodes = Object.values(graph);
+export async function getEvolutionaryHotspots(collectionName: string, userId: string): Promise<EvolutionaryHotspot[]> {
+    const cleanRepoName = collectionName.replace("code_chunks_", "");
+    const repoId = await getRepoId(cleanRepoName, userId);
+    if (!repoId) return [];
 
-    // Group nodes by symbol signature (filePath::name) to count their mutation history
-    const symbolMutations: Record<string, { name: string, filePath: string, count: number }> = {};
-    const uniqueCommits = new Set(nodes.map(n => n.commitSha)).size;
-
-    for (const node of nodes) {
-        if (node.changeType === "deletion") continue;
-        const sig = `${node.filePath}::${node.name}`;
-
-        if (!symbolMutations[sig]) {
-            symbolMutations[sig] = { name: node.name, filePath: node.filePath, count: 0 };
-        }
-
-        if (node.changeType === "mutation") {
-            symbolMutations[sig].count++;
-        }
-    }
-
-    const hotspots = Object.values(symbolMutations).map(sym => {
-        const score = uniqueCommits > 0
-            ? Math.min(10, parseFloat(((sym.count / uniqueCommits) * 10).toFixed(2)))
-            : 0;
-
-        return {
-            name: sym.name,
-            filePath: sym.filePath,
-            score,
-            mutationCount: sym.count
-        };
-    });
-
-    // Sort by entropy score descending, limit to top 5
-    return hotspots.sort((a, b) => b.score - a.score).slice(0, 5);
+    return await fetchEvolutionaryHotspotsFromDB(repoId);
 }
 
 /**
  * Performs a hybrid Graph-Vector retrieval with an LLM Reranking step.
- * 1. Fetches top 15 candidates from Qdrant.
- * 2. Enriches them with caller-callee static dependencies and parent lineage from Compiled Dependency Graph (CDG).
+ * 1. Fetches top 15 candidates from Pinecone.
+ * 2. Enriches them with caller-callee static dependencies and parent lineage from DB.
  * 3. Reranks using an LLM prompt to select the top 5 most relevant.
  */
 export async function retrieveExpandedAndRerankedContext(
@@ -161,13 +133,73 @@ export async function retrieveExpandedAndRerankedContext(
         return "No relevant codebase memory chunks found.";
     }
 
-    // 3. Graph RAG: Load Dependency Graph to inject relationships
-    const graph = await loadCodeGraph(collectionName, userId);
-    const nodes = Object.values(graph);
+    const cleanRepoName = collectionName.replace("code_chunks_", "");
+    const repoId = await getRepoId(cleanRepoName, userId);
+
+    // 3. Graph RAG: Query matching nodes, parents, and callers in batch
+    const candidateSymbolNames: string[] = [];
+    candidates.forEach(chunk => {
+        const match = chunk.text.match(/^(?:Parent\s+)?(?:Function|Class):\s*(\w+)/m);
+        if (match) {
+            candidateSymbolNames.push(match[1]);
+        }
+    });
+
+    let matchedNodes: any[] = [];
+    let parentNamesMap: Record<string, string[]> = {};
+    let callersMap: Record<string, string[]> = {};
+
+    if (repoId && candidateSymbolNames.length > 0) {
+        const adminClient = createAdminClient();
+
+        // Fetch matched nodes in repo
+        const { data: nodes } = await adminClient
+            .from('genetic_nodes')
+            .select('*')
+            .eq('repo_id', repoId)
+            .neq('change_type', 'deletion')
+            .in('name', candidateSymbolNames);
+
+        matchedNodes = nodes || [];
+
+        const matchedNodeIds = matchedNodes.map(n => n.id);
+        if (matchedNodeIds.length > 0) {
+            // Fetch parent names via edge join
+            const { data: parentEdges } = await adminClient
+                .from('genetic_edges')
+                .select('child_node_id, parent:genetic_nodes!parent_node_id(name)')
+                .in('child_node_id', matchedNodeIds);
+
+            (parentEdges || []).forEach((edge: any) => {
+                const childId = edge.child_node_id;
+                const parentName = edge.parent?.name;
+                if (parentName) {
+                    if (!parentNamesMap[childId]) parentNamesMap[childId] = [];
+                    parentNamesMap[childId].push(parentName);
+                }
+            });
+
+            // Fetch callers (who calls this function name)
+            const { data: callers } = await adminClient
+                .from('genetic_nodes')
+                .select('name, calls')
+                .eq('repo_id', repoId)
+                .neq('change_type', 'deletion')
+                .filter('calls', 'ov', `{${candidateSymbolNames.join(',')}}`);
+
+            (callers || []).forEach(caller => {
+                candidateSymbolNames.forEach(targetName => {
+                    if (caller.calls && caller.calls.includes(targetName)) {
+                        if (!callersMap[targetName]) callersMap[targetName] = [];
+                        callersMap[targetName].push(caller.name);
+                    }
+                });
+            });
+        }
+    }
 
     // Enrich candidates with Graph Metadata (Lineage + Call Graph)
     const enrichedCandidates = candidates.map((chunk, idx) => {
-        // Try to identify the matching function or class node in our graph
         const funcNameMatch = chunk.text.match(/^(?:Parent\s+)?(?:Function|Class):\s*(\w+)/m);
         const name = funcNameMatch ? funcNameMatch[1] : null;
 
@@ -175,32 +207,30 @@ export async function retrieveExpandedAndRerankedContext(
         let finalCodeBody = chunk.text;
 
         if (name) {
-            const node = nodes.find(n => n.name === name && n.filePath === chunk.filePath && n.changeType !== "deletion");
+            const node = matchedNodes.find(n => n.name === name && n.file_path === chunk.filePath);
             if (node) {
                 // If it is a sub-chunk, inject the COMPLETE parent body instead of the snippet chunk text
                 if (chunk.text.includes("Parent Function:") || chunk.text.includes("Parent Class:")) {
                     finalCodeBody = [
                         `Function: ${node.name}`,
                         `Type: ${node.type}`,
-                        `File: ${node.filePath}`,
-                        `Commit: ${node.commitSha.slice(0, 7)}`,
+                        `File: ${node.file_path}`,
+                        `Commit: ${node.commit_sha.slice(0, 7)}`,
                         `Code (Full Body):`,
                         node.body
                     ].join("\n");
                 }
 
                 // Ancestry
-                const parentNames = node.parentIds.map(id => graph[id]?.name).filter(Boolean);
+                const parentNames = parentNamesMap[node.id] || [];
 
-                // Call Graph: locate who calls this, and who this calls
+                // Call Graph
                 const callees = node.calls || [];
-                const callers = nodes
-                    .filter(n => n.calls && n.calls.includes(name) && n.changeType !== "deletion")
-                    .map(n => n.name);
+                const callers = callersMap[node.name] || [];
 
                 graphContext = [
                     "\n--- GRAPH RELATIONSHIPS ---",
-                    `File Path: ${node.filePath}`,
+                    `File Path: ${node.file_path}`,
                     parentNames.length > 0 ? `Lineage Ancestors: ${parentNames.join(", ")}` : "",
                     callees.length > 0 ? `Calls: ${callees.join(", ")}` : "",
                     callers.length > 0 ? `Called By: ${callers.join(", ")}` : "",
@@ -243,7 +273,6 @@ Evaluate the chunks. Identify the indices of the top 5 most useful chunks. Retur
             const indices: number[] = JSON.parse(jsonMatch[0]);
             console.log(`[Reranker] Model selected indices:`, indices);
 
-            // Filter and sort the enriched candidates based on the LLM decision
             const reranked = indices
                 .slice(0, limit)
                 .map(idx => enrichedCandidates[idx])
@@ -260,9 +289,3 @@ Evaluate the chunks. Identify the indices of the top 5 most useful chunks. Retur
     // Fallback: default top 5 from similarity search
     return enrichedCandidates.slice(0, limit).map(r => r.text).join("\n\n---\n\n");
 }
-
-
-
-
-
-

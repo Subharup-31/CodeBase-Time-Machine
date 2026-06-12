@@ -360,13 +360,15 @@ async function callOpenRouterTextOnly(
  */
 export async function getEmbeddings(
     input: string | string[],
-    model: string = DEFAULT_EMBEDDING_MODEL
+    model: string = DEFAULT_EMBEDDING_MODEL,
+    retries = 3,
+    delayMs = 1000
 ): Promise<number[][]> {
     if (!OPENROUTER_API_KEY) {
         throw new Error("OPENROUTER_API_KEY is missing in environment variables.");
     }
 
-    try {
+    const fetchEmbeddings = async () => {
         const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
             method: "POST",
             headers: {
@@ -394,12 +396,23 @@ export async function getEmbeddings(
             throw new Error("Invalid embeddings response format from OpenRouter.");
         }
 
-        // Map response to array of number arrays
         return data.data.map((item: any) => item.embedding);
-    } catch (error) {
-        console.error("Error generating embeddings:", error);
-        throw error;
+    };
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await fetchEmbeddings();
+        } catch (error: any) {
+            if (attempt === retries) {
+                console.error("Error generating embeddings after exhaustion of retries:", error);
+                throw error;
+            }
+            const waitMs = delayMs * Math.pow(2, attempt);
+            console.warn(`[OpenRouter] Embedding failed (attempt ${attempt + 1}/${retries + 1}). Retrying in ${waitMs}ms...:`, error.message);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
     }
+    throw new Error("getEmbeddings: exhausted retries");
 }
 
 /**

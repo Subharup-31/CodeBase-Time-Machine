@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { createClient } from '@/lib/supabase/server';
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
@@ -11,21 +10,33 @@ export async function GET(req: Request) {
     }
 
     try {
-        const cacheDir = path.join(process.cwd(), ".cache", "repos");
-        const graphFilePath = path.join(cacheDir, `${repoName}-graph.json`);
+        const supabase = createClient();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
 
-        if (!fs.existsSync(graphFilePath)) {
+        const { data, error } = await supabase
+            .from('repositories')
+            .select('graph_data')
+            .eq('name', repoName)
+            .eq('user_id', user.id)
+            .single();
+
+        if (error || !data || !data.graph_data) {
             return NextResponse.json({ error: "Graph data not found. The repository may not be fully indexed yet." }, { status: 404 });
         }
 
-        const data = fs.readFileSync(graphFilePath, 'utf-8');
-        const graph = JSON.parse(data);
+        const rawData = data.graph_data as any;
+        const graph = rawData.nodes ? rawData.nodes : rawData;
+        const commits = rawData.commits ? rawData.commits : [];
 
-        return NextResponse.json({ graph }, { status: 200 });
+        return NextResponse.json({ graph, commits }, { status: 200 });
     } catch (e) {
         console.error("Error reading graph data:", e);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
 }
+
 
                                                                                                                                                     

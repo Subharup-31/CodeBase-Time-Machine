@@ -1,120 +1,191 @@
-"use client";
+'use client'
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ArrowLeft } from "lucide-react";
-import { motion } from "framer-motion";
+import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 export default function SignupPage() {
-    const router = useRouter();
-    const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [loading, setLoading] = useState(false);
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  
+  const router = useRouter()
+  const supabase = createClient()
 
-    const handleSignup = (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        // Mock signup delay
-        setTimeout(() => {
-            setLoading(false);
-            router.push("/dashboard");
-        }, 1500);
-    };
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    setMessage(null)
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-white relative overflow-hidden font-sans">
-            {/* Background Effects */}
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-50/50 via-white to-white" />
-            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_0%,_rgba(120,119,198,0.1),transparent_50%)]" />
-            <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-40" />
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: name,
+        },
+      },
+    })
 
-            {/* Back Button */}
-            <div className="absolute top-6 left-6 z-20">
-                <Link href="/landing">
-                    <Button variant="ghost" className="text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 gap-2">
-                        <ArrowLeft className="w-4 h-4" />
-                        Back to Home
-                    </Button>
-                </Link>
-            </div>
+    if (error) {
+      setError(error.message)
+    } else {
+      // If auto-confirm is enabled, it might have logged in, otherwise check if session exists
+      if (data.session) {
+        router.push('/dashboard')
+        router.refresh()
+      } else {
+        setMessage('Check your email for the confirmation link!')
+      }
+    }
+    setLoading(false)
+  }
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="w-full max-w-md relative z-10 px-4"
-            >
-                <div className="bg-white/70 backdrop-blur-xl border border-gray-200/50 rounded-2xl shadow-xl shadow-indigo-100/50 p-8">
-                    <div className="text-center mb-8 space-y-2">
-                        <div className="flex justify-center mb-6">
-                            <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-indigo-200">
-                                A
-                            </div>
-                        </div>
-                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Create an account</h1>
-                        <p className="text-gray-500 text-sm">Enter your details to get started</p>
-                    </div>
+  const handleGoogleSignIn = async () => {
+    setLoading(true)
+    setError(null)
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`
+      }
+    })
+    if (error) {
+      setError(error.message)
+    }
+    setLoading(false)
+  }
 
-                    <form onSubmit={handleSignup} className="space-y-6">
-                        <div className="space-y-2">
-                            <label htmlFor="name" className="text-sm font-medium text-gray-700">Full Name</label>
-                            <Input
-                                id="name"
-                                type="text"
-                                placeholder="John Doe"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                required
-                                className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="email" className="text-sm font-medium text-gray-700">Email</label>
-                            <Input
-                                id="email"
-                                type="email"
-                                placeholder="name@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                                className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label htmlFor="password" className="text-sm font-medium text-gray-700">Password</label>
-                            <Input
-                                id="password"
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                className="bg-white/50 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/20"
-                            />
-                        </div>
-
-                        <Button
-                            className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl hover:-translate-y-0.5"
-                            type="submit"
-                            disabled={loading}
-                        >
-                            {loading ? "Creating account..." : "Sign Up"}
-                        </Button>
-
-                        <div className="text-center text-sm text-gray-500">
-                            Already have an account?{" "}
-                            <Link href="/login" className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline">
-                                Sign in
-                            </Link>
-                        </div>
-                    </form>
-                </div>
-            </motion.div>
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-white dark:bg-zinc-950 p-6 text-zinc-900 dark:text-zinc-50 font-sans">
+      <div className="w-full max-w-sm border border-zinc-200 dark:border-zinc-800 rounded-lg p-8 bg-white dark:bg-zinc-900 shadow-sm">
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold tracking-tight">
+            Create an Account
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Sign up to get started with Codebase Time Machine
+          </p>
         </div>
-    );
-}
+        
+        <form onSubmit={handleSignUp} className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="name" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                Full Name
+              </label>
+              <input
+                id="name"
+                name="name"
+                type="text"
+                required
+                className="w-full px-3 py-2 text-sm bg-transparent border border-zinc-200 dark:border-zinc-800 rounded focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-colors"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="email-address" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                Email Address
+              </label>
+              <input
+                id="email-address"
+                name="email"
+                type="email"
+                required
+                className="w-full px-3 py-2 text-sm bg-transparent border border-zinc-200 dark:border-zinc-800 rounded focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-colors"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                className="w-full px-3 py-2 text-sm bg-transparent border border-zinc-200 dark:border-zinc-800 rounded focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-colors"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
 
-                                                                                                                                                                                                   
+          {error && (
+            <div className="text-red-600 dark:text-red-400 text-xs py-1 px-2 border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 rounded">
+              {error}
+            </div>
+          )}
+
+          {message && (
+            <div className="text-green-600 dark:text-green-400 text-xs py-1 px-2 border border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20 rounded">
+              {message}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900 font-medium text-sm rounded hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Creating account...' : 'Sign Up'}
+          </button>
+
+          <div className="relative my-4 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-zinc-200 dark:border-zinc-800" />
+            </div>
+            <span className="relative bg-white dark:bg-zinc-900 px-3 text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+              Or continue with
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded border border-zinc-200 dark:border-zinc-800 bg-transparent px-3 py-2 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" aria-hidden="true" viewBox="0 0 24 24">
+              <path
+                d="M12.0003 4.75C13.7703 4.75 15.3553 5.36002 16.6053 6.54998L20.0303 3.125C17.9502 1.19 15.2353 0 12.0003 0C7.31028 0 3.25527 2.69 1.28027 6.60998L5.27028 9.70498C6.21525 6.86002 8.87028 4.75 12.0003 4.75Z"
+                fill="#EA4335"
+              />
+              <path
+                d="M23.49 12.275C23.49 11.49 23.415 10.73 23.3 10H12V14.51H18.47C18.18 15.99 17.34 17.25 16.08 18.1L19.945 21.1C22.2 19.01 23.49 15.92 23.49 12.275Z"
+                fill="#4285F4"
+              />
+              <path
+                d="M5.26498 14.2949C5.02498 13.5699 4.88501 12.7999 4.88501 11.9999C4.88501 11.1999 5.01998 10.4299 5.26498 9.7049L1.275 6.60986C0.46 8.22986 0 10.0599 0 11.9999C0 13.9399 0.46 15.7699 1.28 17.3899L5.26498 14.2949Z"
+                fill="#FBBC05"
+              />
+              <path
+                d="M12.0004 24.0001C15.2404 24.0001 17.9654 22.935 19.9454 21.095L16.0804 18.095C15.0054 18.82 13.6204 19.245 12.0004 19.245C8.8704 19.245 6.21537 17.135 5.26538 14.29L1.27539 17.385C3.25539 21.31 7.3104 24.0001 12.0004 24.0001Z"
+                fill="#34A853"
+              />
+            </svg>
+            Google
+          </button>
+        </form>
+
+        <div className="mt-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
+          Already have an account?{' '}
+          <Link href="/login" className="font-semibold underline hover:text-zinc-900 dark:hover:text-zinc-100">
+            Sign in
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}

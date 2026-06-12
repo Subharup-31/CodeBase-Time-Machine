@@ -6,13 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loader2, Plus, Trash2, Database, GitBranch, Zap, CheckCircle2, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { createClient } from "@supabase/supabase-js";
 
 interface Repo {
+    id?: string;
     name: string;
     url: string;
     namespace: string;
     createdAt: string;
+    status?: string;
+    progress?: number;
+    progressMessage?: string;
+    errorMessage?: string;
 }
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder-project.supabase.co";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 function autoDetectName(url: string): string {
     const m = url.match(/github\.com\/[^/]+\/([^/]+)/);
@@ -31,6 +41,61 @@ export default function ReposPage() {
 
     useEffect(() => {
         fetchRepos();
+
+        // Subscribe to changes on the repositories table
+        const channel = supabase
+            .channel('public:repositories')
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'repositories' },
+                (payload) => {
+                    const updatedRepo = payload.new;
+                    setRepos((currentRepos) =>
+                        currentRepos.map((repo) =>
+                            repo.name === updatedRepo.name
+                                ? {
+                                    ...repo,
+                                    status: updatedRepo.status,
+                                    progress: updatedRepo.progress,
+                                    progressMessage: updatedRepo.progress_message,
+                                    errorMessage: updatedRepo.error_message,
+                                    indexedAt: updatedRepo.indexed_at
+                                  }
+                                : repo
+                        )
+                    );
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'repositories' },
+                (payload) => {
+                    const newRepo = payload.new;
+                    setRepos((current) => [...current, {
+                        id: newRepo.id,
+                        name: newRepo.name,
+                        url: newRepo.url,
+                        namespace: newRepo.namespace,
+                        createdAt: newRepo.created_at,
+                        status: newRepo.status,
+                        progress: newRepo.progress,
+                        progressMessage: newRepo.progress_message,
+                        errorMessage: newRepo.error_message
+                    }]);
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'DELETE', schema: 'public', table: 'repositories' },
+                (payload) => {
+                    setRepos(current => current.filter(r => r.name !== payload.old.name));
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     // Auto-detect display name from URL
@@ -68,49 +133,17 @@ export default function ReposPage() {
                 body: JSON.stringify({ repoUrl: repoUrl.trim(), displayName: displayName.trim() || undefined }),
             });
 
-            if (!response.body) throw new Error("No stream in response");
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n\n");
-                buffer = lines.pop() ?? "";
-
-                for (const line of lines) {
-                    if (!line.startsWith("data: ")) continue;
-                    try {
-                        const event = JSON.parse(line.slice(6));
-                        if (event.type === "progress") {
-                            setIndexProgress({
-                                stage: event.stage,
-                                message: event.message,
-                                percent: event.percent,
-                            });
-                        } else if (event.type === "done") {
-                            setIndexState("done");
-                            setIndexProgress({ stage: "done", message: event.message, percent: 100 });
-                            setIndexResult({
-                                chunks: event.chunks,
-                                evolutionChunks: event.evolutionChunks,
-                                symbolChunks: event.symbolChunks,
-                            });
-                            setRepoUrl("");
-                            setDisplayName("");
-                            // Refresh repos list
-                            await fetchRepos();
-                        } else if (event.type === "error") {
-                            setIndexState("error");
-                            setIndexError(event.message);
-                        }
-                    } catch {}
-                }
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to queue indexing");
             }
+
+            setIndexState("done");
+            setIndexProgress({ stage: "done", message: "Queued for indexing. Track progress in the list below!", percent: 100 });
+            setRepoUrl("");
+            setDisplayName("");
+            // Refresh repos list
+            await fetchRepos();
         } catch (err: any) {
             setIndexState("error");
             setIndexError(err.message || "Connection failed");
@@ -214,7 +247,7 @@ export default function ReposPage() {
 
                             {/* Success */}
                             <AnimatePresence>
-                                {indexState === "done" && indexResult && (
+                                {indexState === "done" && (
                                     <motion.div
                                         initial={{ opacity: 0, y: 4 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -222,9 +255,15 @@ export default function ReposPage() {
                                     >
                                         <CheckCircle2 className="h-4 w-4 shrink-0" />
                                         <span>
-                                            <strong>{indexResult.chunks}</strong> knowledge chunks indexed —{" "}
-                                            <span className="text-green-600 dark:text-green-400">{indexResult.evolutionChunks} commit diffs</span> +{" "}
-                                            <span className="text-green-600 dark:text-green-400">{indexResult.symbolChunks} code symbols</span>
+                                            {indexResult ? (
+                                                <>
+                                                    <strong>{indexResult.chunks}</strong> knowledge chunks indexed —{" "}
+                                                    <span className="text-green-600 dark:text-green-400">{indexResult.evolutionChunks} commit diffs</span> +{" "}
+                                                    <span className="text-green-600 dark:text-green-400">{indexResult.symbolChunks} code symbols</span>
+                                                </>
+                                            ) : (
+                                                <span>Repository queued for background indexing. You can monitor the progress bar below in real-time!</span>
+                                            )}
                                         </span>
                                     </motion.div>
                                 )}
@@ -268,6 +307,32 @@ export default function ReposPage() {
                                     <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-4 bg-zinc-50 dark:bg-zinc-800 p-2 rounded-lg border border-zinc-200 dark:border-zinc-800/60 font-mono break-all">
                                         {repo.namespace}
                                     </div>
+                                    {repo.status === 'indexing' || repo.status === 'pending' ? (
+                                        <div className="flex flex-col gap-1 mb-4">
+                                            <div className="flex justify-between text-[10px] font-semibold text-zinc-650 dark:text-zinc-350">
+                                                <span className="truncate pr-2">{repo.progressMessage || (repo.status === 'pending' ? "Queued..." : "Indexing...")}</span>
+                                                <span>{repo.progress || 0}%</span>
+                                            </div>
+                                            <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-1">
+                                                <div 
+                                                    className="bg-zinc-900 dark:bg-zinc-100 h-1 rounded-full transition-all duration-500 ease-out" 
+                                                    style={{ width: `${repo.progress || 0}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    ) : repo.status === 'error' ? (
+                                        <div className="flex flex-col gap-1 mb-4">
+                                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
+                                                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-red-500"></span>
+                                                <span className="truncate pr-1">{repo.errorMessage || repo.progressMessage || 'Indexing failed'}</span>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-green-600 dark:text-green-400 mb-4">
+                                            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                                            <span>Ready</span>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between items-center pt-2 border-t border-zinc-200 dark:border-zinc-800">
                                         <div className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 font-medium">
                                             Use @{repo.name}

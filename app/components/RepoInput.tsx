@@ -12,14 +12,14 @@ export default function RepoInput() {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
     const [message, setMessage] = useState("");
-    const [collection, setCollection] = useState("");
+    const [namespace, setNamespace] = useState("");
 
     const handleProcess = async () => {
         if (!repoUrl) return;
         setLoading(true);
         setStatus("idle");
         setMessage("");
-        setCollection("");
+        setNamespace("");
 
         try {
             const res = await fetch("/api/process", {
@@ -33,7 +33,7 @@ export default function RepoInput() {
             if (res.ok) {
                 setStatus("success");
                 setMessage("Repository queued for background indexing. You can view its progress on the Dashboard!");
-                setCollection(data.repoName); // Hack to show repo name
+                setNamespace(data.repoName); // Hack to show repo name
             } else {
                 setStatus("error");
                 setMessage(data.error || "An error occurred");
@@ -45,7 +45,7 @@ export default function RepoInput() {
             setLoading(false);
             
             // Redirect to dashboard after 2 seconds on success
-            if (status === 'success' || (collection && collection.length > 0)) {
+            if (status === 'success' || (namespace && namespace.length > 0)) {
                  setTimeout(() => {
                      window.location.href = '/dashboard';
                  }, 2000);
@@ -102,7 +102,7 @@ export default function RepoInput() {
                         <CheckCircle2 className="h-5 w-5" />
                         <div>
                             <p className="font-medium">{message}</p>
-                            <p className="text-xs opacity-80 mt-1">Memory stored in collection: {collection}</p>
+                            <p className="text-xs opacity-80 mt-1">Memory stored in namespace: {namespace}</p>
                         </div>
                     </div>
                 )}
@@ -117,5 +117,3 @@ export default function RepoInput() {
         </Card>
     );
 }
-
-                                                                                                                                                                                      

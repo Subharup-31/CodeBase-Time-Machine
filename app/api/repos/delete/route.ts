@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteRepo, getRepoByName } from "@/lib/repoRegistry";
-import { deleteRepoCollection } from "@/lib/pinecone";
+import { deleteRepoNamespace } from "@/lib/pinecone";
 
 export async function POST(req: Request) {
     try {
@@ -15,8 +15,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, message: "Repo not found" }, { status: 404 });
         }
 
-        // 1. Delete collection
-        await deleteRepoCollection(repo.collection);
+        // 1. Delete Pinecone namespace vectors
+        await deleteRepoNamespace(repo.namespace);
 
         // 2. Delete from registry
         await deleteRepo(name);
@@ -28,5 +28,3 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
     }
 }
-
-                                                                                                                                                                          

@@ -67,7 +67,7 @@ export default function RepoListClient({ initialRepos }: { initialRepos: any[] }
                         id: newRepo.id,
                         name: newRepo.name,
                         url: newRepo.url,
-                        collection: newRepo.collection,
+                        namespace: newRepo.namespace,
                         createdAt: newRepo.created_at,
                         indexedAt: newRepo.indexed_at,
                         status: newRepo.status,

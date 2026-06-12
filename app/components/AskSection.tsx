@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface Repo {
     name: string;
     url: string;
-    collection: string;
+    namespace: string;
 }
 
 export default function AskSection() {

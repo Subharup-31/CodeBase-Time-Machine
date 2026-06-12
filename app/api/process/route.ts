@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { addRepo, repoExists, getRepoByName } from "@/lib/repoRegistry";
-import { getCollectionName } from "@/lib/pinecone";
+import { getNamespaceName } from "@/lib/pinecone";
 import { parseGithubRepo } from "@/lib/git";
 import { inngest } from "@/lib/inngest/client";
 import { createClient } from "@/lib/supabase/server";
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const { repoUrl, displayName: providedName } = parseResult.data;
 
     const displayName = autoDetectName(repoUrl, providedName);
-    const collectionName = getCollectionName(displayName);
+    const namespaceName = getNamespaceName(displayName);
 
     try {
         // Check if already indexed
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
             await addRepo({
                 name: displayName,
                 url: repoUrl,
-                collection: collectionName,
+                namespace: namespaceName,
                 createdAt: new Date().toISOString(),
                 status: 'pending',
                 progress: 0,

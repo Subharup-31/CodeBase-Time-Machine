@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { getCollectionName, getCollectionStats } from "@/lib/pinecone";
+import { getNamespaceName, getNamespaceStats } from "@/lib/pinecone";
 
 export async function GET(req: Request, { params }: { params: { repoName: string } }) {
     try {
         const { repoName } = params;
-        const collectionName = getCollectionName(repoName);
+        const namespaceName = getNamespaceName(repoName);
 
-        const stats = await getCollectionStats(collectionName);
+        const stats = await getNamespaceStats(namespaceName);
 
         return NextResponse.json({
             repo: repoName,
-            collection: collectionName,
+            namespace: namespaceName,
             vectorCount: stats.vectorCount,
             status: stats.exists ? "ready" : "not_found"
         });
@@ -18,5 +18,3 @@ export async function GET(req: Request, { params }: { params: { repoName: string
         return NextResponse.json({ error: "Failed to get vector count", details: error }, { status: 500 });
     }
 }
-
-                                                                                                                                       

@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface Repo {
     name: string;
     url: string;
-    collection: string;
+    namespace: string;
     createdAt: string;
 }
 
@@ -266,7 +266,7 @@ export default function ReposPage() {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-4 bg-zinc-50 dark:bg-zinc-800 p-2 rounded-lg border border-zinc-200 dark:border-zinc-800/60 font-mono break-all">
-                                        {repo.collection}
+                                        {repo.namespace}
                                     </div>
                                     <div className="flex justify-between items-center pt-2 border-t border-zinc-200 dark:border-zinc-800">
                                         <div className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 font-medium">

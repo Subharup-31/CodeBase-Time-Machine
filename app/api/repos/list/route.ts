@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllRepos } from "@/lib/repoRegistry";
-import { getCollectionStats } from "@/lib/pinecone";
+import { getNamespaceStats } from "@/lib/pinecone";
 
 export const dynamic = "force-dynamic";
 
@@ -8,10 +8,10 @@ export async function GET() {
     try {
         const repos = await getAllRepos();
 
-        // Enrich with indexed status from Qdrant (in parallel)
+        // Enrich with indexed status from Pinecone (in parallel)
         const enriched = await Promise.all(
             repos.map(async (repo) => {
-                const stats = await getCollectionStats(repo.collection);
+                const stats = await getNamespaceStats(repo.namespace);
                 return {
                     ...repo,
                     indexed: stats.exists && stats.vectorCount > 0,
@@ -26,5 +26,3 @@ export async function GET() {
         return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
     }
 }
-
-                                                                                                                                                                                                   

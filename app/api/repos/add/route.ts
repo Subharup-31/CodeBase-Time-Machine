@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { NextResponse } from "next/server";
 import { addRepo, repoExists } from "@/lib/repoRegistry";
-import { getCollectionName, ensureRepoCollection } from "@/lib/pinecone";
+import { getNamespaceName, ensureRepoNamespace } from "@/lib/pinecone";
 import { parseGithubRepo } from "@/lib/git";
 import { createClient } from "@/lib/supabase/server";
 
@@ -57,23 +57,23 @@ export async function POST(req: Request) {
             );
         }
 
-        const collectionName = getCollectionName(displayName);
+        const namespaceName = getNamespaceName(displayName);
 
-        // Ensure Qdrant collection
-        await ensureRepoCollection(collectionName);
+        // Ensure Pinecone namespace
+        await ensureRepoNamespace(namespaceName);
 
-        // Register in repos.json
+        // Register in repositories
         await addRepo({
             name: displayName,
             url: repoUrl,
-            collection: collectionName,
+            namespace: namespaceName,
             createdAt: new Date().toISOString(),
         });
 
         return NextResponse.json({
             success: true,
             message: `Repository "${displayName}" registered. Use the Time Machine page to index it.`,
-            collection: collectionName,
+            namespace: namespaceName,
             name: displayName,
         });
     } catch (error: unknown) {

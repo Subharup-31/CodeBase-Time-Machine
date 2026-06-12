@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     const repoMatch = query.match(/@([\w-]+)/);
     let cleanQuery = query;
     let activeRepoName: string | null = null;
-    let collectionName = "";
+    let namespaceName = "";
     let repoUrl = "";
 
     if (repoMatch) {
@@ -88,7 +88,7 @@ export async function POST(req: Request) {
         const repo = await getRepoByName(requestedName);
         if (repo) {
             activeRepoName = repo.name;
-            collectionName = repo.collection;
+            namespaceName = repo.namespace;
             repoUrl = repo.url;
 
             const mention = repoMatch[0];
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
             const repo = await getRepoByName(targetRepoName);
             if (repo) {
                 activeRepoName = repo.name;
-                collectionName = repo.collection;
+                namespaceName = repo.namespace;
                 repoUrl = repo.url;
             }
         }
@@ -142,7 +142,7 @@ export async function POST(req: Request) {
             // Exactly one repo, use it automatically
             const repo = allRepos[0];
             activeRepoName = repo.name;
-            collectionName = repo.collection;
+            namespaceName = repo.namespace;
             repoUrl = repo.url;
         } else if (allRepos.length > 1) {
             // Multiple repos, ask the user to clarify
@@ -191,7 +191,7 @@ export async function POST(req: Request) {
 
     const cacheKey = `ask:${activeRepoName}:${crypto.createHash('sha256').update(cleanQueryWithMemory).digest('hex')}`;
 
-    console.log(`[Ask] Query: "${cleanQuery}" | Repo: ${activeRepoName} | Collection: ${collectionName}`);
+    console.log(`[Ask] Query: "${cleanQuery}" | Repo: ${activeRepoName} | Namespace: ${namespaceName}`);
 
     // Check Redis Cache (only if Redis is configured)
     if (redis) {
@@ -249,7 +249,7 @@ export async function POST(req: Request) {
 
                 try {
                     // Run the orchestrator — this will stream tokens in real-time if supported
-                    await runOrchestrator(cleanQueryWithMemory, repoUrl, collectionName, user.id, (token) => {
+                    await runOrchestrator(cleanQueryWithMemory, repoUrl, namespaceName, user.id, (token) => {
                         fullResponse += token;
                         send({ type: "chunk", text: token });
                     });

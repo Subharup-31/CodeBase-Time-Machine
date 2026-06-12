@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import { processRepositoryEvolution } from "@/lib/evolutionIndexer";
 import { processRepositoryPhylogenetics } from "@/lib/phylogeneticIndexer";
 import { createAdminClient } from "@/lib/supabase/serviceRole";
-import { getCollectionName, ensureRepoCollection } from "@/lib/pinecone";
+import { getNamespaceName, ensureRepoNamespace } from "@/lib/pinecone";
 
 // Helper to update progress in Supabase
 async function updateRepoProgress(
@@ -34,12 +34,12 @@ export const indexRepository = inngest.createFunction(
     },
     async ({ event, step }) => {
         const { userId, repoUrl, repoName } = event.data;
-        const collectionName = getCollectionName(repoName);
+        const namespaceName = getNamespaceName(repoName);
 
         try {
             // 1. Initial State Update
             await step.run("set-status-indexing", async () => {
-                await ensureRepoCollection(collectionName);
+                await ensureRepoNamespace(namespaceName);
                 await updateRepoProgress(userId, repoName, {
                     status: 'indexing',
                     progress: 5,
@@ -52,7 +52,7 @@ export const indexRepository = inngest.createFunction(
                 let lastUpdate = Date.now();
                 return await processRepositoryEvolution(
                     repoUrl,
-                    collectionName,
+                    namespaceName,
                     80, // index last 80 commits
                     async (e) => {
                         // Throttle updates to Supabase to every 2 seconds
@@ -73,7 +73,7 @@ export const indexRepository = inngest.createFunction(
                 let lastUpdate = Date.now();
                 return await processRepositoryPhylogenetics(
                     repoUrl,
-                    collectionName,
+                    namespaceName,
                     100, // analyze last 100 commits for symbol lineage (was 25)
                     userId,
                     async (e) => {
@@ -130,7 +130,7 @@ export const syncRepository = inngest.createFunction(
     },
     async ({ event, step }) => {
         const { userId, repoUrl, repoName, repoId } = event.data;
-        const collectionName = getCollectionName(repoName);
+        const namespaceName = getNamespaceName(repoName);
 
         try {
             await step.run("set-status-syncing", async () => {
@@ -166,12 +166,12 @@ export const syncRepository = inngest.createFunction(
 
                 // Run incremental evolution diff indexing
                 const evolutionChunks = await processRepositoryEvolution(
-                    repoUrl, collectionName, newCommits.length
+                    repoUrl, namespaceName, newCommits.length
                 );
 
                 // Run incremental phylogenetics only on new commits
                 const symbolChunks = await processRepositoryPhylogenetics(
-                    repoUrl, collectionName, newCommits.length, userId
+                    repoUrl, namespaceName, newCommits.length, userId
                 );
 
                 return { evolutionChunks, symbolChunks };

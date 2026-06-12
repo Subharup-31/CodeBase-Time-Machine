@@ -17,7 +17,7 @@ import MermaidDiagram from "@/app/components/MermaidDiagram";
 interface Repo {
     name: string;
     url: string;
-    collection: string;
+    namespace: string;
     createdAt: string;
     indexed: boolean;
     vectorCount: number;

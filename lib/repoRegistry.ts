@@ -4,7 +4,7 @@ export interface RepoMetadata {
     id?: string;
     name: string;
     url: string;
-    collection: string;
+    namespace: string;
     createdAt: string;
     indexedAt?: string;
     status?: string;
@@ -31,7 +31,7 @@ export async function getAllRepos(): Promise<RepoMetadata[]> {
         id: r.id,
         name: r.name,
         url: r.url,
-        collection: r.collection,
+        namespace: r.namespace,
         createdAt: r.created_at,
         indexedAt: r.indexed_at,
         status: r.status,
@@ -49,7 +49,7 @@ export async function addRepo(repo: RepoMetadata): Promise<void> {
         user_id: userId,
         name: repo.name,
         url: repo.url,
-        collection: repo.collection,
+        namespace: repo.namespace,
         created_at: repo.createdAt,
         indexed_at: repo.indexedAt,
         status: repo.status || 'pending',
@@ -64,7 +64,7 @@ export async function addRepo(repo: RepoMetadata): Promise<void> {
 
 type RepoUpdatePayload = {
     url?: string;
-    collection?: string;
+    namespace?: string;
     indexed_at?: string;
     status?: string;
     progress?: number;
@@ -78,7 +78,7 @@ export async function updateRepo(name: string, patch: Partial<RepoMetadata>): Pr
 
     const updateData: RepoUpdatePayload = {}
     if (patch.url) updateData.url = patch.url
-    if (patch.collection) updateData.collection = patch.collection
+    if (patch.namespace) updateData.namespace = patch.namespace
     if (patch.indexedAt) updateData.indexed_at = patch.indexedAt
     if (patch.status !== undefined) updateData.status = patch.status
     if (patch.progress !== undefined) updateData.progress = patch.progress
@@ -128,7 +128,7 @@ export async function getRepoByName(name: string): Promise<RepoMetadata | undefi
         id: data.id,
         name: data.name,
         url: data.url,
-        collection: data.collection,
+        namespace: data.namespace,
         createdAt: data.created_at,
         indexedAt: data.indexed_at,
         status: data.status,
@@ -142,5 +142,3 @@ export async function repoExists(name: string): Promise<boolean> {
     const repo = await getRepoByName(name)
     return !!repo
 }
-
-

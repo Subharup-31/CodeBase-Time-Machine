@@ -2,7 +2,7 @@ process.env.NEXT_PUBLIC_SUPABASE_URL = "https://dummy.supabase.co";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "dummy-key";
 
 import { describe, it, expect, vi } from 'vitest';
-import { calculateCodeSimilarity, extractSymbols } from '../lib/phylogeneticIndexer';
+import { calculateCodeSimilarity, extractSymbols, calculateAstSimilarity } from '../lib/phylogeneticIndexer';
 import { getEvolutionaryHotspots } from '../lib/phylogeneticRAG';
 
 // Mock graphStore so loadCodeGraph uses the relational path
@@ -46,6 +46,9 @@ vi.mock('../lib/graphStore', () => ({
     saveGraphNodes: vi.fn().mockResolvedValue(undefined),
     markCommitsAsIndexed: vi.fn().mockResolvedValue(undefined),
     getIndexedCommitShas: vi.fn().mockResolvedValue(new Set()),
+    fetchEvolutionaryHotspotsFromDB: vi.fn().mockResolvedValue([
+        { name: 'foo', filePath: 'lib/foo.ts', mutationCount: 1, score: 5.0 }
+    ]),
 }));
 
 describe('calculateCodeSimilarity', () => {
@@ -100,5 +103,23 @@ describe('getEvolutionaryHotspots', () => {
         expect(hotspots.length).toBeGreaterThanOrEqual(1);
         expect(hotspots[0].name).toBe('foo');
         expect(hotspots[0].mutationCount).toBe(1);
+    });
+});
+
+describe('calculateAstSimilarity', () => {
+    it('returns 1.0 for identical syntax sequences', () => {
+        const seq = ['function_definition', 'parameters', 'block', 'return_statement'];
+        expect(calculateAstSimilarity(seq, seq)).toBe(1);
+    });
+
+    it('returns a high score for slight structural changes', () => {
+        const seqA = ['function_definition', 'parameters', 'block', 'if_statement', 'return_statement'];
+        const seqB = ['function_definition', 'parameters', 'block', 'return_statement'];
+        expect(calculateAstSimilarity(seqA, seqB)).toBe(0.8);
+    });
+
+    it('returns 0 if either sequence is empty', () => {
+        expect(calculateAstSimilarity([], ['function_definition'])).toBe(0);
+        expect(calculateAstSimilarity(['function_definition'], [])).toBe(0);
     });
 });

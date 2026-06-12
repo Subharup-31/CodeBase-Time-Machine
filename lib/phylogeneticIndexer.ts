@@ -2,17 +2,13 @@ import { fetchCommitHistory, fetchCommitDetails, fetchFileContent } from "./git"
 import { getEmbeddings } from "./openrouter";
 import { storeVectors } from "./pinecone";
 import { CodeChunk } from "@/types";
-import { createAdminClient } from "./supabase/serviceRole";
-import { saveGraphNodes, loadGraphNodes, getIndexedCommitShas, markCommitsAsIndexed, getRepoId } from "./graphStore";
+import { saveGraphNodes, getIndexedCommitShas, markCommitsAsIndexed, getRepoId } from "./graphStore";
 import { Config } from "./config";
-
+import { createAdminClient } from "./supabase/serviceRole";
 
 import { v4 as uuidv4 } from "uuid";
-import Parser from "tree-sitter";
-// @ts-ignore
-import TypeScript from "tree-sitter-typescript";
-// @ts-ignore
-import Python from "tree-sitter-python";
+import crypto from "crypto";
+import Parser from "web-tree-sitter";
 
 export interface CodeSymbol {
     name: string;
@@ -22,6 +18,8 @@ export interface CodeSymbol {
     filePath: string;
     commitSha: string;
     calls: string[];
+    structuralHash: string;
+    astNodeSequence: string[];
 }
 
 export interface GeneticNode {
@@ -34,6 +32,7 @@ export interface GeneticNode {
     changeType: "origin" | "mutation" | "speciation" | "deletion";
     body: string;
     calls: string[];
+    structuralHash: string;
 }
 
 /**
@@ -45,7 +44,7 @@ function getTokens(code: string): Set<string> {
 }
 
 /**
- * Calculates similarity between two code blocks.
+ * Calculates Jaccard similarity between two sets of code line tokens.
  */
 export function calculateCodeSimilarity(codeA: string, codeB: string): number {
     const tokensA = getTokens(codeA);
@@ -59,6 +58,28 @@ export function calculateCodeSimilarity(codeA: string, codeB: string): number {
     const unionSize = tokensA.size + tokensB.size - intersectionCount;
     if (unionSize === 0) return 0;
     return intersectionCount / unionSize;
+}
+
+/**
+ * Fuzzy structural comparison on AST sequences (immune to renames)
+ */
+export function calculateAstSimilarity(seqA: string[], seqB: string[]): number {
+    if (seqA.length === 0 || seqB.length === 0) return 0;
+    const freqA: Record<string, number> = {};
+    const freqB: Record<string, number> = {};
+    seqA.forEach(t => freqA[t] = (freqA[t] || 0) + 1);
+    seqB.forEach(t => freqB[t] = (freqB[t] || 0) + 1);
+    
+    let intersection = 0;
+    let union = 0;
+    const allKeys = new Set([...Object.keys(freqA), ...Object.keys(freqB)]);
+    allKeys.forEach(k => {
+        const cA = freqA[k] || 0;
+        const cB = freqB[k] || 0;
+        intersection += Math.min(cA, cB);
+        union += Math.max(cA, cB);
+    });
+    return union === 0 ? 0 : intersection / union;
 }
 
 const controlKeywords = new Set([
@@ -80,8 +101,6 @@ function getCallsFromTextRegex(body: string): string[] {
     }
     return Array.from(new Set(calls));
 }
-
-
 
 /**
  * Precise parser for Python, Go, and brace-based languages (Java, C++, C#).
@@ -131,7 +150,9 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
                     body: bodyText,
                     filePath,
                     commitSha,
-                    calls: getCallsFromTextRegex(bodyText)
+                    calls: getCallsFromTextRegex(bodyText),
+                    structuralHash: crypto.createHash("sha256").update(bodyText.replace(/\s+/g, "")).digest("hex"),
+                    astNodeSequence: []
                 });
                 // Since we incremented i, we decrement to not skip a line
                 i--;
@@ -178,7 +199,9 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
                         body: bodyText,
                         filePath,
                         commitSha,
-                        calls: getCallsFromTextRegex(bodyText)
+                        calls: getCallsFromTextRegex(bodyText),
+                        structuralHash: crypto.createHash("sha256").update(bodyText.replace(/\s+/g, "")).digest("hex"),
+                        astNodeSequence: []
                     });
                 }
             }
@@ -190,7 +213,7 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
         while (i < lines.length) {
             const line = lines[i];
             // Matches class declarations or functions/methods
-            const match = line.match(/\b(class|void|int|string|bool|float|double|public|private|protected|static|fn)\s+(\w+)\s*[\(<\s{]/i);
+            const match = line.match(/\b(class|void|int|string|bool|float|double|public|private|protected|static|fn|function)\s+(\w+)\s*[\(<\s{]/i);
 
             if (match && line.includes("{")) {
                 const keyword = match[1].toLowerCase();
@@ -224,7 +247,9 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
                         body: bodyText,
                         filePath,
                         commitSha,
-                        calls: getCallsFromTextRegex(bodyText)
+                        calls: getCallsFromTextRegex(bodyText),
+                        structuralHash: crypto.createHash("sha256").update(bodyText.replace(/\s+/g, "")).digest("hex"),
+                        astNodeSequence: []
                     });
                 }
             }
@@ -235,22 +260,79 @@ function extractSymbolsMultiLanguage(code: string, filePath: string, commitSha: 
     return symbols;
 }
 
-const parsers = {
-    ts: new Parser(),
-    tsx: new Parser(),
-    py: new Parser()
-};
+let isParserInitialized = false;
+let parserTs: Parser | null = null;
+let parserTsx: Parser | null = null;
+let parserPy: Parser | null = null;
 
-try {
-    parsers.ts.setLanguage(TypeScript.typescript as any);
-    parsers.tsx.setLanguage(TypeScript.tsx as any);
-    parsers.py.setLanguage(Python as any);
-} catch (e) {
-    console.warn("Failed to set Tree-Sitter languages", e);
+/**
+ * Initializes web-tree-sitter asynchronously using CDN-hosted WASM binaries
+ */
+export async function ensureParserInitialized(): Promise<void> {
+    if (isParserInitialized) return;
+    try {
+        await Parser.init({
+            locateFile(scriptName: string) {
+                return `https://cdn.jsdelivr.net/npm/web-tree-sitter@0.20.8/${scriptName}`;
+            }
+        });
+
+        const [tsLang, tsxLang, pyLang] = await Promise.all([
+            Parser.Language.load("https://cdn.jsdelivr.net/npm/tree-sitter-wasms@0.1.11/out/tree-sitter-typescript.wasm"),
+            Parser.Language.load("https://cdn.jsdelivr.net/npm/tree-sitter-wasms@0.1.11/out/tree-sitter-tsx.wasm"),
+            Parser.Language.load("https://cdn.jsdelivr.net/npm/tree-sitter-wasms@0.1.11/out/tree-sitter-python.wasm")
+        ]);
+
+        parserTs = new Parser();
+        parserTs.setLanguage(tsLang);
+
+        parserTsx = new Parser();
+        parserTsx.setLanguage(tsxLang);
+
+        parserPy = new Parser();
+        parserPy.setLanguage(pyLang);
+
+        isParserInitialized = true;
+    } catch (e) {
+        console.error("[ParserInit] Failed to initialize web-tree-sitter parser, using regex fallback.", e);
+    }
 }
 
 /**
- * Parses a file's content using Tree-Sitter AST Compiler API (for JS/TS/JSX/TSX and Python)
+ * Computes Merkle-like structural hash of AST node types recursively
+ */
+export function computeStructuralHash(node: Parser.SyntaxNode): string {
+    const childHashes: string[] = [];
+    for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child && child.type !== "comment") {
+            childHashes.push(computeStructuralHash(child));
+        }
+    }
+    const content = `${node.type}(${childHashes.join(",")})`;
+    return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * Extracts sequence of AST node types for similarity checks
+ */
+export function getAstNodeSequence(node: Parser.SyntaxNode): string[] {
+    const sequence: string[] = [];
+    function visit(n: Parser.SyntaxNode) {
+        if (n.type !== "comment" && n.type !== "{" && n.type !== "}" && n.type !== "(" && n.type !== ")") {
+            sequence.push(n.type);
+        }
+        for (let i = 0; i < n.childCount; i++) {
+            const child = n.child(i);
+            if (child) visit(child);
+        }
+    }
+    visit(node);
+    return sequence;
+}
+
+/**
+ * Parses a file's content using WebAssembly Tree-Sitter AST Compiler API
  * or falls back to language-specific multi-language parser.
  */
 export function extractSymbols(code: string, filePath: string, commitSha: string): CodeSymbol[] {
@@ -260,13 +342,13 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
     let parser: Parser | null = null;
     let isPython = false;
 
-    if (ext === "py") {
-        parser = parsers.py;
+    if (ext === "py" && parserPy) {
+        parser = parserPy;
         isPython = true;
-    } else if (ext === "ts" || ext === "js") {
-        parser = parsers.ts;
-    } else if (ext === "tsx" || ext === "jsx") {
-        parser = parsers.tsx;
+    } else if ((ext === "ts" || ext === "js") && parserTs) {
+        parser = parserTs;
+    } else if ((ext === "tsx" || ext === "jsx") && parserTsx) {
+        parser = parserTsx;
     }
 
     if (!parser) {
@@ -297,7 +379,9 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
                             body,
                             filePath,
                             commitSha,
-                            calls: getCallsFromTextRegex(body)
+                            calls: getCallsFromTextRegex(body),
+                            structuralHash: computeStructuralHash(node),
+                            astNodeSequence: getAstNodeSequence(node)
                         });
                     }
                 }
@@ -319,7 +403,9 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
                             body,
                             filePath,
                             commitSha,
-                            calls: getCallsFromTextRegex(body)
+                            calls: getCallsFromTextRegex(body),
+                            structuralHash: computeStructuralHash(node),
+                            astNodeSequence: getAstNodeSequence(node)
                         });
                     }
                 } else if (type === "variable_declarator") {
@@ -338,7 +424,9 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
                             body,
                             filePath,
                             commitSha,
-                            calls: getCallsFromTextRegex(body)
+                            calls: getCallsFromTextRegex(body),
+                            structuralHash: computeStructuralHash(node),
+                            astNodeSequence: getAstNodeSequence(node)
                         });
                     }
                 }
@@ -358,8 +446,6 @@ export function extractSymbols(code: string, filePath: string, commitSha: string
     }
 }
 
-
-
 import { ProgressEvent } from "./evolutionIndexer";
 
 /**
@@ -367,13 +453,16 @@ import { ProgressEvent } from "./evolutionIndexer";
  */
 export async function processRepositoryPhylogenetics(
     repoUrl: string,
-    collectionName: string,
+    collectionName: string, // Keep parameter for compatibility (maps to namespaceName)
     commitLimit: number = 20,
     userId: string,
     onProgress?: (e: ProgressEvent) => void
 ): Promise<number> {
     console.log(`[Phylogenetics] Commencing index for ${repoUrl}`);
     onProgress?.({ message: `Starting code symbol analysis...`, percent: 0 });
+
+    // Initialize the WebAssembly parser before starting extraction
+    await ensureParserInitialized();
 
     // 1. Fetch recent commits
     const commits = await fetchCommitHistory(repoUrl, commitLimit);
@@ -387,76 +476,63 @@ export async function processRepositoryPhylogenetics(
     let previousCommitSymbols: CodeSymbol[] = [];
     let previousNodeMap: Record<string, string> = {}; // Symbol Signature -> GeneticNode.id
     let commitsToIndex = sortedCommits;
-    let baseCommitsList: any[] = [];
 
     try {
         const cleanRepoName = collectionName.replace("code_chunks_", "");
         const repoId = await getRepoId(cleanRepoName, userId);
         if (repoId) {
-            const existingGraph = await loadGraphNodes(repoId);
-            const indexedShas = await getIndexedCommitShas(repoId);
+            const adminClient = createAdminClient();
+            const { data: latestCommit } = await adminClient
+                .from('indexed_commits')
+                .select('commit_sha')
+                .eq('repo_id', repoId)
+                .order('indexed_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
-            if (indexedShas.size > 0) {
-                const adminClient = createAdminClient();
-                const { data: latestCommit } = await adminClient
-                    .from('indexed_commits')
-                    .select('commit_sha')
-                    .eq('repo_id', repoId)
-                    .order('indexed_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
+            const lastIndexedSha = latestCommit?.commit_sha;
+            if (lastIndexedSha) {
+                console.log(`[Phylogenetics] Found existing index. Last indexed commit: ${lastIndexedSha.slice(0, 7)}`);
 
-                const lastIndexedSha = latestCommit?.commit_sha;
-                if (lastIndexedSha) {
-                    console.log(`[Phylogenetics] Found existing index. Last indexed commit: ${lastIndexedSha.slice(0, 7)}`);
+                // Check if the latest commit in history is the same as lastIndexedSha
+                if (commits.length > 0 && commits[0].sha === lastIndexedSha) {
+                    console.log(`[Phylogenetics] Repository is already up to date.`);
+                    onProgress?.({ message: `Repository is already up to date.`, percent: 100 });
+                    return 0; // Return 0 new chunks since it's up to date
+                }
 
-                    // Check if the latest commit in history is the same as lastIndexedSha
-                    if (commits.length > 0 && commits[0].sha === lastIndexedSha) {
-                        console.log(`[Phylogenetics] Repository is already up to date.`);
-                        onProgress?.({ message: `Repository is already up to date.`, percent: 100 });
-                        return Object.keys(existingGraph).length;
-                    }
+                // Find where the lastIndexedSha is in our fetched commits history
+                const lastIdx = commits.findIndex(c => c.sha === lastIndexedSha);
+                if (lastIdx !== -1) {
+                    // Commits to process are the ones since lastIndexedSha, processed chronologically (oldest to newest)
+                    commitsToIndex = [...commits.slice(0, lastIdx)].reverse();
+                    console.log(`[Phylogenetics] Incremental index: processing ${commitsToIndex.length} new commits.`);
 
-                    // Find where the lastIndexedSha is in our fetched commits history
-                    const lastIdx = commits.findIndex(c => c.sha === lastIndexedSha);
-                    if (lastIdx !== -1) {
-                        // Commits to process are the ones since lastIndexedSha, processed chronologically (oldest to newest)
-                        commitsToIndex = [...commits.slice(0, lastIdx)].reverse();
-                        console.log(`[Phylogenetics] Incremental index: processing ${commitsToIndex.length} new commits.`);
+                    // Fetch active nodes at target ref using DB queries
+                    const { data: activeNodes } = await adminClient
+                        .from('genetic_nodes')
+                        .select('*')
+                        .eq('repo_id', repoId)
+                        .neq('change_type', 'deletion');
 
-                        // Copy existing nodes into graph
-                        Object.assign(graph, existingGraph);
+                    // Set indexer loop state
+                    previousCommitSymbols = (activeNodes || []).map(n => ({
+                        name: n.name,
+                        type: n.type as any,
+                        signature: "",
+                        body: n.body || "",
+                        filePath: n.file_path,
+                        commitSha: n.commit_sha,
+                        calls: n.calls || [],
+                        structuralHash: n.structural_hash || "",
+                        astNodeSequence: [] // Fallback since raw sequences aren't stored
+                    }));
 
-                        // Reconstruct active symbols at lastIndexedSha
-                        const allowedCommits = indexedShas;
-                        const nodesUpToTarget = Object.values(graph).filter(n => allowedCommits.has(n.commitSha));
-
-                        const parentIdsSet = new Set<string>();
-                        nodesUpToTarget.forEach(n => {
-                            n.parentIds.forEach(pid => parentIdsSet.add(pid));
-                        });
-
-                        const activeNodes = nodesUpToTarget.filter(n => !parentIdsSet.has(n.id) && n.changeType !== 'deletion');
-
-                        // Set indexer loop state
-                        previousCommitSymbols = activeNodes.map(n => ({
-                            name: n.name,
-                            type: n.type,
-                            signature: "", // Not strictly needed for mapping, but matching interface
-                            body: n.body,
-                            filePath: n.filePath,
-                            commitSha: n.commitSha,
-                            calls: n.calls
-                        }));
-
-                        previousNodeMap = {};
-                        activeNodes.forEach(n => {
-                            const sig = `${n.filePath}::${n.name}`;
-                            previousNodeMap[sig] = n.id;
-                        });
-                    } else {
-                        console.log(`[Phylogenetics] Last indexed commit not found in recent history limit. Falling back to full rebuild.`);
-                    }
+                    previousNodeMap = {};
+                    (activeNodes || []).forEach(n => {
+                        const sig = `${n.file_path}::${n.name}`;
+                        previousNodeMap[sig] = n.id;
+                    });
                 }
             }
         }
@@ -465,7 +541,6 @@ export async function processRepositoryPhylogenetics(
     }
 
     onProgress?.({ message: `Fetching details for ${commitsToIndex.length} commits in parallel...`, percent: 10 });
-    // Pre-fetch commit details in parallel to avoid sequential API wait latency
     console.log(`[Phylogenetics] Pre-fetching details for ${commitsToIndex.length} commits in parallel...`);
     const allCommitDetails = await Promise.all(
         commitsToIndex.map(commit => fetchCommitDetails(repoUrl, commit.sha))
@@ -517,7 +592,6 @@ export async function processRepositoryPhylogenetics(
             const nodeId = uuidv4();
             currentNodeMap[symSig] = nodeId;
 
-            // Find candidates in previous commit for linkage
             let parentIds: string[] = [];
             let changeType: GeneticNode["changeType"] = "origin";
 
@@ -534,17 +608,27 @@ export async function processRepositoryPhylogenetics(
                     changeType = "mutation";
                 }
             } else {
-                // 2. Look for copy-pastes or renames (high similarity elsewhere)
+                // 2. Look for copy-pastes or renames (high AST structural similarity)
+                const bodyLines = currentSym.body.split("\n").length;
+                
+                // Exclude tiny getters/setters (less than 5 lines) from cross-file copy-paste mapping to avoid noise
                 const prevSimilarMatches = previousCommitSymbols
-                    .map(p => ({
-                        sym: p,
-                        sig: `${p.filePath}::${p.name}`,
-                        similarity: calculateCodeSimilarity(currentSym.body, p.body)
-                    }))
-                    .filter(item => item.similarity > Config.SPECIATION_SIMILARITY_THRESHOLD); // Configurable via SPECIATION_SIMILARITY_THRESHOLD env var
+                    .map(p => {
+                        const similarity = currentSym.astNodeSequence.length > 0 && p.astNodeSequence.length > 0
+                            ? calculateAstSimilarity(currentSym.astNodeSequence, p.astNodeSequence)
+                            : calculateCodeSimilarity(currentSym.body, p.body);
+                        return { sym: p, sig: `${p.filePath}::${p.name}`, similarity };
+                    })
+                    .filter(item => {
+                        const isSameFileRename = currentSym.filePath === item.sym.filePath && item.similarity > Config.SPECIATION_SIMILARITY_THRESHOLD;
+                        const isSameNameMove = currentSym.name === item.sym.name && item.similarity > Config.SPECIATION_SIMILARITY_THRESHOLD;
+                        const isNearExactClone = bodyLines >= 5 && item.similarity > 0.90;
+                        
+                        return isSameNameMove || isSameFileRename || isNearExactClone;
+                    });
 
                 if (prevSimilarMatches.length > 0) {
-                    // Linked as a speciation/divergence from parent
+                    // Linked as a speciation/divergence from parents
                     for (const match of prevSimilarMatches) {
                         const prevNodeId = previousNodeMap[match.sig];
                         if (prevNodeId) {
@@ -564,11 +648,12 @@ export async function processRepositoryPhylogenetics(
                 parentIds,
                 changeType,
                 body: currentSym.body,
-                calls: currentSym.calls
+                calls: currentSym.calls,
+                structuralHash: currentSym.structuralHash
             };
         }
 
-        // Identify deletions (symbols in previous commit that disappeared in the current one)
+        // Identify deletions
         for (const prevSym of previousCommitSymbols) {
             const prevSig = `${prevSym.filePath}::${prevSym.name}`;
             const stillExists = currentCommitSymbols.some(
@@ -588,7 +673,8 @@ export async function processRepositoryPhylogenetics(
                         parentIds: [prevNodeId],
                         changeType: "deletion",
                         body: "",
-                        calls: []
+                        calls: [],
+                        structuralHash: prevSym.structuralHash
                     };
                 }
             }
@@ -604,10 +690,10 @@ export async function processRepositoryPhylogenetics(
     if (repoId) {
         await saveGraphNodes(repoId, userId, graph);
         await markCommitsAsIndexed(repoId, commitsToIndex.map(c => c.sha));
-        console.log(`[Phylogenetics] Saved code graph with ${Object.keys(graph).length} nodes and commits to Supabase relational tables.`);
+        console.log(`[Phylogenetics] Saved code graph with ${Object.keys(graph).length} nodes and commits to Supabase.`);
     }
 
-    // 3. Upload embeddings of current active symbols to Qdrant for semantic lookups
+    // 3. Upload embeddings of current active symbols to Pinecone namespaces
     const activeNodes = Object.values(graph).filter(n => n.changeType !== "deletion");
     if (activeNodes.length === 0) return 0;
 
@@ -615,7 +701,6 @@ export async function processRepositoryPhylogenetics(
 
     for (const node of activeNodes) {
         const bodyLines = node.body.split("\n");
-        // If function/class body is larger than 25 lines, chunk it to fit vector token bounds
         if (bodyLines.length > 25) {
             const chunkSize = 15;
             const overlap = 5;
@@ -645,7 +730,6 @@ export async function processRepositoryPhylogenetics(
                 if (end === bodyLines.length) break;
             }
         } else {
-            // Short function/class node is stored in full
             const formattedText = [
                 `Function: ${node.name}`,
                 `Type: ${node.type}`,
@@ -684,14 +768,10 @@ export async function processRepositoryPhylogenetics(
     }
 
     onProgress?.({ message: `Saving ${chunks.length} symbols to knowledge base...`, percent: 95 });
+    // storeVectors internally routes to the Pinecone namespace matching collectionName
     await storeVectors(collectionName, chunks);
     onProgress?.({ message: `Symbol graph complete! ${chunks.length} functions & classes indexed.`, percent: 100 });
-    console.log(`[Phylogenetics] Indexed all active symbols in Qdrant!`);
+    console.log(`[Phylogenetics] Indexed all active symbols in Pinecone!`);
 
     return chunks.length;
 }
-
-
-
-
-

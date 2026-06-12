@@ -42,9 +42,7 @@
         "tailwind-merge": "^2.5.4",
         "tailwindcss-animate": "^1.0.7",
         "tar": "^7.5.16",
-        "tree-sitter": "^0.25.0",
-        "tree-sitter-python": "^0.25.0",
-        "tree-sitter-typescript": "^0.23.2",
+        "web-tree-sitter": "^0.20.8",
         "typescript": "^5",
         "uuid": "^11.0.3",
         "zod": "^4.4.3"

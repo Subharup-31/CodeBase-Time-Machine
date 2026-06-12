@@ -8,7 +8,7 @@ CREATE TABLE repositories (
     -- Two different users can both index a repo called "react".
     name TEXT NOT NULL,
     url TEXT NOT NULL,
-    collection TEXT NOT NULL UNIQUE,
+    namespace TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     indexed_at TIMESTAMP WITH TIME ZONE,
     status TEXT DEFAULT 'pending',
@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS genetic_nodes (
     change_type TEXT NOT NULL CHECK (change_type IN ('origin', 'mutation', 'speciation', 'deletion')),
     body TEXT,
     calls TEXT[], -- array of called symbol names
+    structural_hash TEXT, -- Merkle-like AST structural hash
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()) NOT NULL
 );
 
@@ -144,5 +145,67 @@ ALTER TABLE indexed_commits ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Service role can manage indexed commits"
     ON indexed_commits FOR ALL
     USING (true);
+
+
+-- ============================================================
+-- Recursive and Traversal Helper Stored Procedures
+-- ============================================================
+
+-- Recursive Lineage Traversal (Common Table Expression)
+CREATE OR REPLACE FUNCTION get_symbol_ancestors(start_node_id UUID)
+RETURNS SETOF genetic_nodes AS $$
+BEGIN
+    RETURN QUERY
+    WITH RECURSIVE lineage AS (
+        -- Anchor member: get the starting node
+        SELECT n.id, n.repo_id, n.user_id, n.name, n.type, n.file_path, n.commit_sha, n.change_type, n.body, n.calls, n.structural_hash, n.created_at
+        FROM genetic_nodes n
+        WHERE n.id = start_node_id
+
+        UNION
+
+        -- Recursive member: get parents of current nodes in the CTE
+        SELECT parent.id, parent.repo_id, parent.user_id, parent.name, parent.type, parent.file_path, parent.commit_sha, parent.change_type, parent.body, parent.calls, parent.structural_hash, parent.created_at
+        FROM genetic_nodes parent
+        INNER JOIN genetic_edges edge ON edge.parent_node_id = parent.id
+        INNER JOIN lineage child ON edge.child_node_id = child.id
+    )
+    SELECT * FROM lineage;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Evolutionary Volatility Hotspots (Aggregation)
+CREATE OR REPLACE FUNCTION get_evolutionary_hotspots(target_repo_id UUID)
+RETURNS TABLE (
+    name TEXT,
+    filepath TEXT,
+    mutationcount BIGINT,
+    score DOUBLE PRECISION
+) AS $$
+DECLARE
+    total_commits BIGINT;
+BEGIN
+    -- Get total indexed commits for this repository
+    SELECT COUNT(*) INTO total_commits FROM indexed_commits WHERE repo_id = target_repo_id;
+    
+    RETURN QUERY
+    SELECT 
+        g.name,
+        g.file_path AS filepath,
+        COUNT(*) FILTER (WHERE g.change_type = 'mutation') AS mutationcount,
+        CASE 
+            WHEN total_commits > 0 THEN 
+                LEAST(10.0, (COUNT(*) FILTER (WHERE g.change_type = 'mutation')::DOUBLE PRECISION / total_commits) * 10.0)
+            ELSE 0.0
+        END AS score
+    FROM genetic_nodes g
+    WHERE g.repo_id = target_repo_id 
+      AND g.change_type != 'deletion'
+    GROUP BY g.repo_id, g.name, g.file_path
+    ORDER BY score DESC, mutationcount DESC
+    LIMIT 5;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 
 
